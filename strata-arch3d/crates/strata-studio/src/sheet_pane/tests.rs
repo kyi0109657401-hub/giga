@@ -950,3 +950,14 @@ fn test_plate_gauge_lines_use_report_values_across_flips() {
         );
     }
 }
+
+#[test]
+fn test_msii_mix_weights_sum_to_one() {
+    // B8: 명명된 상수의 불변식 — 가중합이 발산하지 않아야 한다.
+    // (합이 1이 아니면 탁본 명암이 전체적으로 밝아지거나 어두워진다.)
+    let sum: f32 = MSII_MIX_WEIGHTS.iter().sum();
+    assert!(
+        (sum - 1.0).abs() < 1e-6,
+        "MSII 혼합 가중치 합이 1이 아님: {sum}"
+    );
+}

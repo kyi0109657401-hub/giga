@@ -239,6 +239,21 @@ pub fn msii_radii_for_extent(extent_px: u32) -> [u32; 4] {
 /// 조각 메쉬의 부분 extent가 아니다.
 pub const SEAM_SPAN_FRACTION: f64 = 0.45;
 
+/// MSII 다중스케일 결합 상수 (B8: 매직넘버 명명, 값 불변).
+///
+/// `curv_cancel_a_b = ((z_c - z_ra) - blend_ab * (z_c - z_rb)) * gain_ab` 형태의
+/// (이득, 이전 스케일 혼합비) 쌍과 최종 혼합비(합 1.0 고정)이다.
+/// f32 정밀도로 기존 리터럴과 비트 동일.
+pub const MSII_CANCEL_1_2: (f32, f32) = (9.5, 0.333_333);
+pub const MSII_CANCEL_2_4: (f32, f32) = (5.6, 0.20);
+pub const MSII_CANCEL_4_8: (f32, f32) = (3.2, 0.22);
+pub const MSII_MIX_WEIGHTS: [f32; 3] = [0.46, 0.34, 0.20];
+/// PCV 차폐 지수 감쇠율 (B8).
+pub const AO_FALLOUT_RATE: f32 = 2.2;
+/// Vergne Radiance Scaling 조도 기준·기울기 (B8).
+pub const RELIEF_BASE: f32 = 0.78;
+pub const RELIEF_SLOPE: f32 = 0.28;
+
 /// 곡면 전개도에서 봉합선($\theta = \pm\pi$)을 가로지르는 삼각형 판별.
 /// 세 정점의 전개 좌표가 총 폭의 절반 이상 벌어지면 봉합선 스패닝으로 보고 컬링한다.
 pub fn is_seam_spanning_triangle(u: [f64; 3], total_width_mm: f64) -> bool {
@@ -571,17 +586,23 @@ pub fn render_orthographic_rubbing_rgba_with_params(
                 let z_r2 = box_mean_z_fast(x, y, msii_r[1] as usize);
                 let z_r4 = box_mean_z_fast(x, y, msii_r[2] as usize);
                 let z_r8 = box_mean_z_fast(x, y, msii_r[3] as usize);
-                let curv_cancel_1_2 = ((z_c - z_r1) - 0.333_333 * (z_c - z_r2)) * 9.5;
-                let curv_cancel_2_4 = ((z_c - z_r2) - 0.20 * (z_c - z_r4)) * 5.6;
-                let curv_cancel_4_8 = ((z_c - z_r4) - 0.22 * (z_c - z_r8)) * 3.2;
-                let msii_val =
-                    ((0.46 * curv_cancel_1_2 + 0.34 * curv_cancel_2_4 + 0.20 * curv_cancel_4_8)
-                        * detail_boost)
-                        .clamp(-1.8, 1.8);
+                let curv_cancel_1_2 =
+                    ((z_c - z_r1) - MSII_CANCEL_1_2.1 * (z_c - z_r2)) * MSII_CANCEL_1_2.0;
+                let curv_cancel_2_4 =
+                    ((z_c - z_r2) - MSII_CANCEL_2_4.1 * (z_c - z_r4)) * MSII_CANCEL_2_4.0;
+                let curv_cancel_4_8 =
+                    ((z_c - z_r4) - MSII_CANCEL_4_8.1 * (z_c - z_r8)) * MSII_CANCEL_4_8.0;
+                let msii_val = ((MSII_MIX_WEIGHTS[0] * curv_cancel_1_2
+                    + MSII_MIX_WEIGHTS[1] * curv_cancel_2_4
+                    + MSII_MIX_WEIGHTS[2] * curv_cancel_4_8)
+                    * detail_boost)
+                    .clamp(-1.8, 1.8);
 
                 // (d) 반경 제한 PCV Ambient Occlusion (타솔이 음각 홈 바닥에 닿지 못하는 차폐율)
                 let local_cavity_depth = (z_r4 - z_c).max(0.0);
-                let ao_val = (-local_cavity_depth * 2.2).exp().clamp(0.05, 1.0);
+                let ao_val = (-local_cavity_depth * AO_FALLOUT_RATE)
+                    .exp()
+                    .clamp(0.05, 1.0);
 
                 // (e) raster_rubbing.rs lines 133-142: tanh 곡률 정규화 + Smoothstep 타솔 접촉 확률
                 let combined = 0.44 * msii_val
@@ -597,7 +618,8 @@ pub fn render_orthographic_rubbing_rgba_with_params(
                 let nz_vis = n_cur[1].clamp(0.15, 1.0);
                 let ndotl = (n_cur[0] * light_lx + n_cur[1] * light_ly + n_cur[2] * light_lz)
                     .clamp(0.12, 1.0);
-                let relief_light = (0.78 + 0.28 * ndotl * light_int).clamp(0.55, 1.35);
+                let relief_light =
+                    (RELIEF_BASE + RELIEF_SLOPE * ndotl * light_int).clamp(0.55, 1.35);
 
                 out_row[x] =
                     (ao_val.powf(1.35) * smooth * nz_vis.powf(0.28) * relief_light).clamp(0.0, 1.0);
