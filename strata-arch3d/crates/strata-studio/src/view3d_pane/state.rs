@@ -139,6 +139,33 @@ pub fn compute_concentric_grid_radius_mm(artifact_radius_mm: f64) -> f64 {
     artifact_radius_mm * 1.20
 }
 
+/// 다크 뷰포트 배경 후보 (task-12 A/B 선정용).
+///
+/// - `Current`: 기존 한 단계 밝은 플랫 (`#201E1A`).
+/// - `WarmCharcoalGradient`: A안 — 웜 차콜 그라데이션 (중앙 `#45423C` → 가장자리 `#23211D`).
+/// - `FlatTaupe`: B안 — 플랫 `#38352F`.
+/// - `AdaptiveContrast`: C안 — 유물 평균 밝기에 따라 배경 자동 반전
+///   (어두운 유물 → `#38352F`, 밝은 유물 → `#201E1A`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DarkViewportBg {
+    Current,
+    WarmCharcoalGradient,
+    FlatTaupe,
+    AdaptiveContrast,
+}
+
+impl DarkViewportBg {
+    /// 캡처용 선택자 (`STRATA_DARK_BG`: `a`/`b`/`c`, 그 외·미설정 = 현행).
+    pub fn from_selector(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "a" | "gradient" => Self::WarmCharcoalGradient,
+            "b" | "flat" => Self::FlatTaupe,
+            "c" | "adaptive" => Self::AdaptiveContrast,
+            _ => Self::Current,
+        }
+    }
+}
+
 /// 3D Z-버퍼 프레임 더티 캐시 키.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct View3DRenderCacheKey {
@@ -162,6 +189,8 @@ pub struct View3DRenderCacheKey {
     pub light_int_q: i32,
     /// 화면 UI 다크 모드 (래스터 바탕색이 바뀌므로 캐시 무효화 대상).
     pub dark_mode: bool,
+    /// 다크 뷰포트 배경 후보 (바탕이 바뀌므로 캐시 무효화 대상).
+    pub viewport_bg: DarkViewportBg,
 }
 
 type CurvesCacheKey = (String, i32, i32, i32, i32, i32, i32, i32);
@@ -226,6 +255,8 @@ pub struct View3DPaneState {
     pub cached_h_segs: Vec<[[f64; 3]; 2]>,
     /// 화면 UI 다크 모드 (뷰포트 바탕만 다크, 측정 격자·유물 색상은 불변).
     pub dark_mode: bool,
+    /// 다크 뷰포트 배경 후보 (task-12 A/B 선정용, 기본값=현행).
+    pub dark_viewport_bg: DarkViewportBg,
 }
 
 impl std::fmt::Debug for View3DPaneState {
@@ -289,6 +320,7 @@ impl Default for View3DPaneState {
             cached_v_segs: Vec::new(),
             cached_h_segs: Vec::new(),
             dark_mode: false,
+            dark_viewport_bg: DarkViewportBg::Current,
         }
     }
 }
@@ -341,6 +373,7 @@ impl View3DPaneState {
             light_el_q: (self.light_elevation_deg * 2.0).round() as i32,
             light_int_q: (self.light_intensity * 50.0).round() as i32,
             dark_mode: self.dark_mode,
+            viewport_bg: self.dark_viewport_bg,
         }
     }
 

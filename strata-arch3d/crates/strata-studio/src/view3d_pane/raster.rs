@@ -6,6 +6,74 @@ use strata_core::{SurfaceRegion, TriMesh};
 use super::geometry::*;
 use super::state::*;
 
+/// A안 그라데이션 양 끝점 (중앙 `#45423C` → 가장자리 `#23211D`).
+pub const VIEWPORT_GRADIENT_CENTER: [u8; 3] = [0x45, 0x42, 0x3C];
+pub const VIEWPORT_GRADIENT_EDGE: [u8; 3] = [0x23, 0x21, 0x1D];
+/// B안 플랫 (`#38352F`).
+pub const VIEWPORT_FLAT_TAUPE: [u8; 3] = [0x38, 0x35, 0x2F];
+/// C안 적응형 판정 임계 (유물 평균 휘도, 0.0~1.0).
+pub const ADAPTIVE_LUMA_THRESHOLD: f32 = 0.45;
+
+/// 다크 뷰포트 바탕을 후보 모드대로 칠한다 (task-12 A/B 선정용).
+///
+/// - `Current` = 기존 한 단계 밝은 플랫, 라이트 모드 = 흰 면.
+/// - `WarmCharcoalGradient` = 중앙→가장자리 방사형 그라데이션.
+/// - `FlatTaupe` = 플랫 `#38352F`.
+/// - `AdaptiveContrast` = 유물 평균 휘도가 임계 미만(어두운 유물)이면
+///   `#38352F`, 이상(밝은 유물)이면 `#201E1A`.
+pub(crate) fn fill_dark_viewport_bg(img: &mut RgbaImage, mode: DarkViewportBg, mesh: &TriMesh) {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    match mode {
+        DarkViewportBg::Current => fill_solid(img, crate::theme::dark::VIEWPORT_BG),
+        DarkViewportBg::FlatTaupe => fill_solid(img, VIEWPORT_FLAT_TAUPE),
+        DarkViewportBg::AdaptiveContrast => {
+            let mut sum = 0.0f64;
+            let mut cnt = 0u64;
+            for c in &mesh.colors_rgb {
+                sum +=
+                    0.2126 * f64::from(c[0]) + 0.7152 * f64::from(c[1]) + 0.0722 * f64::from(c[2]);
+                cnt += 1;
+            }
+            let luma = if cnt > 0 {
+                (sum / cnt as f64 / 255.0) as f32
+            } else {
+                1.0
+            };
+            let bg = if luma < ADAPTIVE_LUMA_THRESHOLD {
+                VIEWPORT_FLAT_TAUPE
+            } else {
+                crate::theme::dark::VIEWPORT_BG
+            };
+            fill_solid(img, bg);
+        }
+        DarkViewportBg::WarmCharcoalGradient => {
+            let (cw, ch) = (w as f64 * 0.5, h as f64 * 0.5);
+            let max_d = (cw * cw + ch * ch).sqrt().max(1.0);
+            for (idx, px) in img.pixels_mut().enumerate() {
+                let x = (idx % w) as f64;
+                let y = (idx / w) as f64;
+                let dx = x + 0.5 - cw;
+                let dy = y + 0.5 - ch;
+                let t = ((dx * dx + dy * dy).sqrt() / max_d).clamp(0.0, 1.0) as f32;
+                let c0 = VIEWPORT_GRADIENT_CENTER;
+                let c1 = VIEWPORT_GRADIENT_EDGE;
+                *px = Rgba([
+                    (f32::from(c0[0]) + (f32::from(c1[0]) - f32::from(c0[0])) * t).round() as u8,
+                    (f32::from(c0[1]) + (f32::from(c1[1]) - f32::from(c0[1])) * t).round() as u8,
+                    (f32::from(c0[2]) + (f32::from(c1[2]) - f32::from(c0[2])) * t).round() as u8,
+                    255,
+                ]);
+            }
+        }
+    }
+
+    fn fill_solid(img: &mut RgbaImage, bg: [u8; 3]) {
+        for px in img.pixels_mut() {
+            *px = Rgba([bg[0], bg[1], bg[2], 255]);
+        }
+    }
+}
+
 /// 월드 좌표 `(wx, wy, wz)`를 3D 뷰포트 화면 좌표 `(sx, sy, depth)`로 투영한다.
 #[inline]
 #[allow(clippy::too_many_arguments)]
@@ -102,18 +170,17 @@ pub fn render_topdown_concentric_plan_rgba(
 ) -> RgbaImage {
     let w_usize = width.max(32) as usize;
     let h_usize = height.max(32) as usize;
-    // 다크 모드에서는 뷰포트 바탕을 밤 작업대보다 한 단계 밝게 칠한다(격자·유물 색상은 불변).
-    // 캐시키에 dark_mode이 포함되므로 모드 전환 시 다시 렌더링된다.
-    let bg = if state.dark_mode {
-        crate::theme::dark::VIEWPORT_BG
+    // 다크 모드에서는 후보 배경으로 칠한다(격자·유물 색상은 불변).
+    // 캐시키에 dark_mode + viewport_bg가 포함되므로 모드 전환 시 다시 렌더링된다.
+    let mut img = RgbaImage::new(w_usize as u32, h_usize as u32);
+    if state.dark_mode {
+        fill_dark_viewport_bg(&mut img, state.dark_viewport_bg, mesh);
     } else {
-        SURFACE.rgb
-    };
-    let mut img = RgbaImage::from_pixel(
-        w_usize as u32,
-        h_usize as u32,
-        Rgba([bg[0], bg[1], bg[2], 255]),
-    );
+        let bg = SURFACE.rgb;
+        for px in img.pixels_mut() {
+            *px = Rgba([bg[0], bg[1], bg[2], 255]);
+        }
+    }
     let mut zbuf = vec![f32::INFINITY; w_usize * h_usize];
 
     let ext = mesh.bbox.extents();
@@ -283,16 +350,16 @@ pub fn render_mesh_zbuffer_rgba(
 ) -> RgbaImage {
     let w_usize = width.max(16) as usize;
     let h_usize = height.max(16) as usize;
-    let bg = if state.dark_mode {
-        crate::theme::dark::VIEWPORT_BG
+    // 다크 모드에서는 후보 배경으로 칠한다(격자·유물 색상은 불변).
+    let mut img = RgbaImage::new(w_usize as u32, h_usize as u32);
+    if state.dark_mode {
+        fill_dark_viewport_bg(&mut img, state.dark_viewport_bg, mesh);
     } else {
-        SURFACE.rgb
-    };
-    let mut img = RgbaImage::from_pixel(
-        w_usize as u32,
-        h_usize as u32,
-        Rgba([bg[0], bg[1], bg[2], 255]),
-    );
+        let bg = SURFACE.rgb;
+        for px in img.pixels_mut() {
+            *px = Rgba([bg[0], bg[1], bg[2], 255]);
+        }
+    }
     let mut zbuf = vec![f32::INFINITY; w_usize * h_usize];
 
     let active_mode = state.effective_shader_mode();

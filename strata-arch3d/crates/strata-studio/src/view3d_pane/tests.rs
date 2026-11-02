@@ -1,3 +1,4 @@
+use image::RgbaImage;
 use strata_core::strata_tokens::tokens::SURFACE;
 use strata_core::TriMesh;
 
@@ -679,4 +680,42 @@ fn test_xray_renders_back_to_front_deterministically() {
     let a = render_mesh_zbuffer_rgba(&mesh, None, &state, 160, 160);
     let b = render_mesh_zbuffer_rgba(&mesh, None, &state, 160, 160);
     assert_eq!(a.as_raw(), b.as_raw(), "X-Ray 렌더가 비결정적이면 안 됨");
+}
+
+#[test]
+fn test_dark_viewport_bg_three_candidates() {
+    // task-12 A/B 선정용 3종 프리셋 검증 (동일 장면 캡처용).
+    let mesh = make_test_bowl_mesh();
+    let mut img = RgbaImage::new(200, 200);
+    // A: 웜 차콜 그라데이션 — 중심 #45423C, 가장자리 #23211D.
+    fill_dark_viewport_bg(&mut img, DarkViewportBg::WarmCharcoalGradient, &mesh);
+    assert_eq!(img.get_pixel(100, 100).0[0..3], [0x45, 0x42, 0x3C]);
+    assert_eq!(img.get_pixel(0, 0).0[0..3], [0x23, 0x21, 0x1D]);
+    // B: 플랫 #38352F.
+    fill_dark_viewport_bg(&mut img, DarkViewportBg::FlatTaupe, &mesh);
+    assert!(
+        img.pixels().all(|p| p.0[0..3] == [0x38, 0x35, 0x2F]),
+        "B안은 전역 플랫이어야 함"
+    );
+    // C: 적응형 — 어두운 유물 → 밝은 배경, 밝은 유물 → 어두운 배경.
+    let mut dark_mesh = make_test_bowl_mesh();
+    dark_mesh.colors_rgb = vec![[40, 30, 25]; dark_mesh.positions.len()];
+    fill_dark_viewport_bg(&mut img, DarkViewportBg::AdaptiveContrast, &dark_mesh);
+    assert_eq!(img.get_pixel(100, 100).0[0..3], [0x38, 0x35, 0x2F]);
+    let mut bright_mesh = make_test_bowl_mesh();
+    bright_mesh.colors_rgb = vec![[235, 228, 218]; bright_mesh.positions.len()];
+    fill_dark_viewport_bg(&mut img, DarkViewportBg::AdaptiveContrast, &bright_mesh);
+    assert_eq!(
+        img.get_pixel(100, 100).0[0..3],
+        crate::theme::dark::VIEWPORT_BG
+    );
+    // 선택자 기본값 = 현행.
+    assert_eq!(
+        DarkViewportBg::from_selector("zzz"),
+        DarkViewportBg::Current
+    );
+    assert_eq!(
+        DarkViewportBg::from_selector("A"),
+        DarkViewportBg::WarmCharcoalGradient
+    );
 }
