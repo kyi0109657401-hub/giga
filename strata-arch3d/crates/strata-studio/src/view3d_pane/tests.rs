@@ -538,6 +538,21 @@ fn test_hd_render_dimensions_scale_with_pixels_per_point() {
     assert!(!recomputed3, "동일 dpr는 캐시 적중해야 함");
 }
 
+#[test]
+fn test_light_quantization_matches_rubbing_pipeline() {
+    // B3 고정점: 0.4° 광원 이동은 양쪽 캐시 모두 적중, 0.6° 이동은 양쪽 모두 무효화되어야 한다.
+    // (한쪽만 성기면 같은 조작에 3D와 탁본이 어긋난다.)
+    let key_at = |az: f32| {
+        let state = View3DPaneState {
+            light_azimuth_deg: az,
+            ..Default::default()
+        };
+        state.build_cache_key("quant_probe", 200, 200)
+    };
+    assert_eq!(key_at(315.0), key_at(315.2));
+    assert_ne!(key_at(315.0), key_at(315.6));
+}
+
 fn section_drawn_half_width(mesh: &TriMesh, tilt_deg: f64, psi_deg: f64) -> f64 {
     let state = View3DPaneState {
         tilt_deg,

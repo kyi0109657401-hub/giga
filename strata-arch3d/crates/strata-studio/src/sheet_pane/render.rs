@@ -71,14 +71,18 @@ pub fn render_sheet_pane_egui(
     }
 
     let rub_view_tf = state.view_transforms[2];
+    // B3 고정점: 3D 뷰 캐시키와 동일한 양자화 스텝(방위각·고도각 0.5°, ψ 0.1°)을 쓴다.
+    // 한쪽만 성기면 같은 조작에 한쪽만 재계산되어 탁본이 어긋난다.
     let key: SheetRubbingCacheKey = (
         (
             mesh.name.clone(),
-            psi_deg.round() as i32,
+            (psi_deg / RUBBING_PSI_QUANT_DEG).round() as i32,
             (state.rubbing_params.pose_tilt_deg * 10.0).round() as i32,
             (state.rubbing_params.pose_roll_deg * 10.0).round() as i32,
-            state.rubbing_params.light_azimuth_deg.round() as i32,
-            state.rubbing_params.light_elevation_deg.round() as i32,
+            (state.rubbing_params.light_azimuth_deg as f64 / RUBBING_LIGHT_QUANT_DEG).round()
+                as i32,
+            (state.rubbing_params.light_elevation_deg as f64 / RUBBING_LIGHT_QUANT_DEG).round()
+                as i32,
             (state.rubbing_params.light_intensity * 100.0).round() as i32,
         ),
         (

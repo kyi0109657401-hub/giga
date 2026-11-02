@@ -871,6 +871,20 @@ fn test_resolve_rim_label_width_mm_always_uses_report() {
 }
 
 #[test]
+fn test_light_hash_quantization_matches_view3d_cache() {
+    // B3 고정점: 0.4° 광원 이동은 해시 동일, 0.6° 이동은 해시 상이해야 한다 (0.5° 양자화).
+    let hash_at = |az: f32| {
+        let p = AcademicRubbingParams {
+            light_azimuth_deg: az,
+            ..AcademicRubbingParams::default()
+        };
+        rubbing_params_hash(&p)
+    };
+    assert_eq!(hash_at(315.0), hash_at(315.2));
+    assert_ne!(hash_at(315.0), hash_at(315.6));
+}
+
+#[test]
 fn test_plate_gauge_lines_use_report_values_across_flips() {
     // 추가분: 상태바·도판(구경선/저경선)·치수선이 뒤집기 각도와 무관하게 리포트값과 일치해야 한다.
     use strata_export::{compose_archaeological_plate, PlateComposeInput, PlateLayoutMode};

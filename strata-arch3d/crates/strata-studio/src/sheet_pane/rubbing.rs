@@ -140,8 +140,9 @@ pub fn rubbing_params_hash(p: &AcademicRubbingParams) -> u64 {
     });
     feed((p.pose_tilt_deg * 10.0).round() as i64);
     feed((p.pose_roll_deg * 10.0).round() as i64);
-    feed(p.light_azimuth_deg.round() as i64);
-    feed(p.light_elevation_deg.round() as i64);
+    // B3 고정점: 캐시키와 동일한 양자화(광원 0.5°) — 한쪽만 성키면 어긋난다.
+    feed((f64::from(p.light_azimuth_deg) / RUBBING_LIGHT_QUANT_DEG).round() as i64);
+    feed((f64::from(p.light_elevation_deg) / RUBBING_LIGHT_QUANT_DEG).round() as i64);
     feed((p.light_intensity * 100.0).round() as i64);
     feed(match p.unroll_mode {
         None => 0,

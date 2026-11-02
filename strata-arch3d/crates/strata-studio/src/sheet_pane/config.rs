@@ -53,6 +53,11 @@ pub enum RubbingFineWheelKind {
 /// 표준 농도 78% · 표준 해상도 180px.
 pub const RUBBING_STANDARD_INK_PCT: f64 = 78.0;
 pub const RUBBING_STANDARD_RES_PX: u32 = 180;
+/// 탁본 캐시 키 양자화 단위 (B3 고정점 — 3D 뷰 캐시키와 동일 스텝).
+/// 방위각·고도각 0.5° · 회전각(ψ) 0.1° · 세기 0.01.
+/// 한쪽만 성기면 같은 조작에 한쪽만 재계산되어 탁본이 어긋난다.
+pub const RUBBING_LIGHT_QUANT_DEG: f64 = 0.5;
+pub const RUBBING_PSI_QUANT_DEG: f64 = 0.1;
 
 /// 학술 디지털 탁본 파라미터 (`탁본 이미지 바로 밑 4종 미세조정 휠` 및 `부분 정밀 탁본 창` 공용).
 #[derive(Debug, Clone, PartialEq)]
