@@ -182,7 +182,13 @@ pub struct View3DPaneState {
     pub artifact_offset_x_mm: f64,
     /// 유물·단면선 앞뒤 미세조정 오프셋 `ΔY` (`mm`, 하단 가로 휠 `Image 2` & `Image 5`)
     pub cut_y_mm: f64,
-    /// 수평 횡단면 높이 `Top Cut Z` (`mm`)
+    /// 수평 횡단면 높이 `Top Cut Z` (mm).
+    ///
+    /// - **월드 좌표계 절대 높이**다 (유물 바닥 `z = 0` 기준, 상대 오프셋이 아님).
+    ///   변환된 월드 정점이 항상 `z ∈ [0, 기고]` 에 들어가므로 이 범위 안의 값만 유효하다.
+    /// - 새 유물 로드 시 [`.ap2` 절단면 값 → 없으면 기고의 50%](Self::initialize_top_cut_for_mesh)로
+    ///   초기화된다. 휠은 `0.5..=450.0mm` 범위에서, 방향키는
+    ///   `0.5..=(기고 − 0.5)mm` 범위에서 움직인다 — 범위를 벗어나면 절단면이 유물을 빗나간다.
     pub top_cut_z_mm: f64,
     pub top_cut_initialized_for_mesh: String,
     /// 유물 상하 회전(`↑위·↓아래`, 좌측 세로 휠 `Image 4`, `-30.0° .. +30.0°`)

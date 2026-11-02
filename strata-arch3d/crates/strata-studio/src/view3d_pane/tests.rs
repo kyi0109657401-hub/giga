@@ -553,6 +553,24 @@ fn test_light_quantization_matches_rubbing_pipeline() {
     assert_ne!(key_at(315.0), key_at(315.6));
 }
 
+#[test]
+fn test_top_cut_z_defaults_to_half_height_in_world_coords() {
+    // B4 문서화 고정: top_cut_z_mm는 월드 절대 높이. 기본값=기고 50%, 절단은 빗나가지 않아야 한다.
+    let mesh = make_test_bowl_mesh();
+    let mut state = View3DPaneState::default();
+    state.initialize_top_cut_for_mesh(&mesh);
+    assert!(
+        (state.top_cut_z_mm - 30.0).abs() < 1e-9,
+        "기본 절단면은 기고 절반이어야 함: {}",
+        state.top_cut_z_mm
+    );
+    let hsec = slice_transformed_mesh_world_locked(&mesh, &state, false);
+    assert!(
+        hsec.polylines_2d.iter().any(|p| p.len() >= 2),
+        "기본 높이에서 수평횡단면이 비어 있으면 안 됨"
+    );
+}
+
 fn section_drawn_half_width(mesh: &TriMesh, tilt_deg: f64, psi_deg: f64) -> f64 {
     let state = View3DPaneState {
         tilt_deg,
