@@ -49,7 +49,7 @@ pub fn render_view3d_pane_egui(
     // 다크 모드에서는 뷰포트 바탕만 다크로 바꾼다. 측정 격자·유물·칩·글자 색상은 그대로 둔다
     // (칩은 밝은 바탕을 유지하므로 가독성이 깨지지 않는다. 실측 출력물 색상 불변 철칙).
     let viewport_bg = if state.dark_mode {
-        crate::theme::chrome_for(true).desk
+        crate::theme::chrome_for(crate::theme::ThemeMode::Dark).desk
     } else {
         surface
     };
@@ -1261,6 +1261,8 @@ pub fn render_view3d_pane_egui(
                     .max_rect(ctrl_rect)
                     .layout(egui::Layout::top_down(egui::Align::Min)),
             );
+            // 밝은 광원창 칩 위 기본 위젯(버튼·DragValue)은 라이트로 고정 — 다크에서 묻힘 방지.
+            l_ui.style_mut().visuals = egui::Visuals::light();
             l_ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
             l_ui.horizontal(|ui| {
                 if ui

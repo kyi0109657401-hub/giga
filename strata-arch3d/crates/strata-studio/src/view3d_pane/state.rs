@@ -144,6 +144,8 @@ pub struct View3DRenderCacheKey {
     pub light_az_q: i32,
     pub light_el_q: i32,
     pub light_int_q: i32,
+    /// 화면 UI 다크 모드 (래스터 바탕색이 바뀌므로 캐시 무효화 대상).
+    pub dark_mode: bool,
 }
 
 type CurvesCacheKey = (String, i32, i32, i32, i32, i32, i32, i32);
@@ -319,6 +321,7 @@ impl View3DPaneState {
             light_az_q: (self.light_azimuth_deg * 2.0).round() as i32,
             light_el_q: (self.light_elevation_deg * 2.0).round() as i32,
             light_int_q: (self.light_intensity * 50.0).round() as i32,
+            dark_mode: self.dark_mode,
         }
     }
 

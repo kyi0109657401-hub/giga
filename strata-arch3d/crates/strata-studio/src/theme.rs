@@ -21,16 +21,24 @@ pub enum ThemeMode {
 }
 
 impl ThemeMode {
-    /// 토글 UI에 쓰는 한국어 라벨.
-    pub fn toggle_label_kr(self) -> &'static str {
-        match self {
-            Self::Light => "다크 모드",
-            Self::Dark => "다크 모드",
+    /// 불리언 플래그를 테마 모드로 바꾼다.
+    pub fn from_bool(dark_mode: bool) -> Self {
+        if dark_mode {
+            Self::Dark
+        } else {
+            Self::Light
         }
     }
 
     pub fn is_dark(self) -> bool {
         matches!(self, Self::Dark)
+    }
+
+    /// 상단 바 체크박스용 한국어 라벨.
+    ///
+    /// 체크박스는 모드와 무관하게 같은 문구를 쓴다(옵션 이름이지 상태 표시가 아니다).
+    pub fn toggle_label_kr(self) -> &'static str {
+        "다크 모드"
     }
 }
 
@@ -88,8 +96,8 @@ fn rgb(c: [u8; 3]) -> egui::Color32 {
 }
 
 /// 모드에 맞는 화면 크롬 색상을 돌려준다.
-pub fn chrome_for(dark_mode: bool) -> UiChrome {
-    if dark_mode {
+pub fn chrome_for(mode: ThemeMode) -> UiChrome {
+    if mode.is_dark() {
         UiChrome {
             panel: rgb(dark::PANEL),
             window: rgb(dark::PANEL),
@@ -126,10 +134,10 @@ pub fn chrome_for(dark_mode: bool) -> UiChrome {
 ///
 /// 스톡 위젯(버튼·입력·스크롤·기본 글자)은 `Visuals`가 맡고,
 /// 명시적 바탕 칠(상단 바·중앙 여백·뷰포트)은 각 렌더러가 `chrome_for` 값을 쓴다.
-pub fn apply_app_visuals(ctx: &egui::Context, dark_mode: bool) {
-    let chrome = chrome_for(dark_mode);
+pub fn apply_app_visuals(ctx: &egui::Context, mode: ThemeMode) {
+    let chrome = chrome_for(mode);
     ctx.all_styles_mut(|style| {
-        style.visuals = if dark_mode {
+        style.visuals = if mode.is_dark() {
             egui::Visuals::dark()
         } else {
             egui::Visuals::light()
@@ -161,15 +169,23 @@ mod tests {
     #[test]
     fn test_toggle_label_is_korean() {
         for mode in [ThemeMode::Light, ThemeMode::Dark] {
-            let label = mode.toggle_label_kr();
+            let label = ThemeMode::toggle_label_kr(mode);
             assert_eq!(label, "다크 모드");
             assert!(label.chars().any(|c| ('가'..='힣').contains(&c)));
         }
     }
 
     #[test]
+    fn test_theme_mode_from_bool_roundtrip() {
+        assert_eq!(ThemeMode::from_bool(false), ThemeMode::Light);
+        assert_eq!(ThemeMode::from_bool(true), ThemeMode::Dark);
+        assert!(!ThemeMode::Light.is_dark());
+        assert!(ThemeMode::Dark.is_dark());
+    }
+
+    #[test]
     fn test_light_chrome_matches_light_tokens() {
-        let light = chrome_for(false);
+        let light = chrome_for(ThemeMode::Light);
         assert_eq!(light.panel, rgb(GROUND.rgb));
         assert_eq!(light.desk, rgb(DESK.rgb));
         assert_eq!(light.ink, rgb(INK.rgb));
@@ -178,16 +194,16 @@ mod tests {
 
     #[test]
     fn test_paper_stays_white_in_both_modes() {
-        for dark_mode in [false, true] {
-            let chrome = chrome_for(dark_mode);
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            let chrome = chrome_for(mode);
             assert_eq!(chrome.paper, egui::Color32::WHITE, "용지는 다크에서도 흰색");
         }
     }
 
     #[test]
     fn test_dark_chrome_differs_for_workspace_but_not_output() {
-        let light = chrome_for(false);
-        let dark = chrome_for(true);
+        let light = chrome_for(ThemeMode::Light);
+        let dark = chrome_for(ThemeMode::Dark);
         assert_ne!(dark.panel, light.panel, "패널은 다크에서 바뀌어야 함");
         assert_ne!(dark.desk, light.desk, "작업대는 다크에서 바뀌어야 함");
         assert_ne!(dark.ink, light.ink, "글자는 다크에서 바뀌어야 함");
@@ -207,7 +223,7 @@ mod tests {
     #[test]
     fn test_apply_app_visuals_does_not_panic() {
         let ctx = egui::Context::default();
-        apply_app_visuals(&ctx, false);
-        apply_app_visuals(&ctx, true);
+        apply_app_visuals(&ctx, ThemeMode::Light);
+        apply_app_visuals(&ctx, ThemeMode::Dark);
     }
 }

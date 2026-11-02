@@ -37,6 +37,12 @@ pub fn render_sheet_pane_egui(
     let grid_1 = egui::Color32::from_rgb(GRID_1MM.rgb[0], GRID_1MM.rgb[1], GRID_1MM.rgb[2]);
     let ink = egui::Color32::from_rgb(INK.rgb[0], INK.rgb[1], INK.rgb[2]);
     let muted = egui::Color32::from_rgb(MUTED.rgb[0], MUTED.rgb[1], MUTED.rgb[2]);
+    // 정밀 탁본 창(egui Window, 다크에서는 창 바탕이 다크) 위 직접 문구용.
+    let roi_muted = if state.dark_mode {
+        crate::theme::chrome_for(crate::theme::ThemeMode::Dark).muted
+    } else {
+        muted
+    };
     let terra = egui::Color32::from_rgb(ACTION.rgb[0], ACTION.rgb[1], ACTION.rgb[2]);
     let profile_red =
         egui::Color32::from_rgb(PROFILE_RED.rgb[0], PROFILE_RED.rgb[1], PROFILE_RED.rgb[2]);
@@ -1230,6 +1236,8 @@ pub fn render_sheet_pane_egui(
                         .max_rect(r_rect)
                         .layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
+                // 종이 칩 위 기본 위젯(체크박스·라벨·버튼)은 라이트로 고정 — 다크에서 반전 방지.
+                l_ui.style_mut().visuals = egui::Visuals::light();
                 l_ui.spacing_mut().item_spacing.x = 3.0;
                 let vis = &mut state.view_transforms[l_idx].visible;
                 let _ = l_ui.checkbox(vis, "");
@@ -1320,6 +1328,8 @@ pub fn render_sheet_pane_egui(
                     .max_rect(content_rect)
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
             );
+            // 종이 칩 위 기본 위젯(DragValue·색상편집)은 라이트로 고정 — 다크에서 반전 방지.
+            child_ui.style_mut().visuals = egui::Visuals::light();
             child_ui.spacing_mut().item_spacing.x = 3.0;
             match idx {
                 0 => {
@@ -1388,6 +1398,8 @@ pub fn render_sheet_pane_egui(
                 .max_rect(top_style_bar_rect.shrink2(egui::vec2(6.0, 2.0)))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
+        // 종이 헤더 바 위 기본 위젯(ComboBox·버튼)은 라이트로 고정 — 다크에서 반전 방지.
+        bar_ui.style_mut().visuals = egui::Visuals::light();
         bar_ui.spacing_mut().item_spacing.x = 4.0;
 
         bar_ui.label(egui::RichText::new("■ 조판용지:").size(9.5).strong().color(terra));
@@ -1564,6 +1576,8 @@ pub fn render_sheet_pane_egui(
                 .max_rect(bot_scale_bar_rect.shrink2(egui::vec2(6.0, 2.0)))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
+        // 종이 칩 위 축척 버튼은 라이트로 고정 — 다크에서 반전 방지.
+        scale_ui.style_mut().visuals = egui::Visuals::light();
         scale_ui.spacing_mut().item_spacing.x = 4.0;
         scale_ui.label(egui::RichText::new("📐 도면 축척:").size(9.5).strong().color(terra));
         for (preset, lbl) in [
@@ -1610,7 +1624,7 @@ pub fn render_sheet_pane_egui(
                 .collapsible(false)
                 .show(ui.ctx(), |ui| {
                     ui.colored_label(
-                        muted,
+                        roi_muted,
                         "도판 위에서 [⬚ 부분탁본 선택] 후 마우스로 드래그하면 드래그한 1:1 크기로 정밀 탁본이 추출됩니다.",
                     );
                     ui.add_space(4.0);
@@ -1724,7 +1738,7 @@ pub fn render_sheet_pane_egui(
                                 ),
                             );
                         } else {
-                            ui.colored_label(muted, "현재: 유물 전체 영역 탁본 표시 중");
+                            ui.colored_label(roi_muted, "현재: 유물 전체 영역 탁본 표시 중");
                         }
                         if ui.button("전체 탁본 복원").clicked() {
                             state.set_rubbing_roi_mm(None);

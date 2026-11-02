@@ -462,3 +462,30 @@ fn test_tdd19_custom_section_line_single_endpoint_move_and_2d_profile() {
         "custom section line across vessel must produce 2D cross-section polylines"
     );
 }
+
+#[test]
+fn test_dark_mode_invalidates_zbuffer_cache_and_darkens_viewport_bg() {
+    // Gemini 리뷰 a6ecaaa ③: 다크 전환 시 래스터 바탕이 바뀌어야 하고 캐시가 무효화되어야 한다.
+    let mesh = make_test_bowl_mesh();
+    let mut state = View3DPaneState::default();
+    let (_, _, recomputed1) = state.ensure_zbuffer_cached(&mesh, None, 120, 120);
+    assert!(recomputed1, "첫 렌더링은 재계산되어야 함");
+    let (_, _, recomputed2) = state.ensure_zbuffer_cached(&mesh, None, 120, 120);
+    assert!(!recomputed2, "동일 상태는 캐시 적중해야 함");
+    state.dark_mode = true;
+    let (_, _, recomputed3) = state.ensure_zbuffer_cached(&mesh, None, 120, 120);
+    assert!(recomputed3, "다크 전환 시 캐시가 무효화되어야 함");
+    let img = state.cached_zbuffer_rgba.as_ref().expect("cached image");
+    let dark_bg_px = img
+        .pixels()
+        .filter(|p| {
+            p.0[0] == crate::theme::dark::DESK[0]
+                && p.0[1] == crate::theme::dark::DESK[1]
+                && p.0[2] == crate::theme::dark::DESK[2]
+        })
+        .count();
+    assert!(
+        dark_bg_px > 1_000,
+        "다크 래스터에 밤 작업대 배경이 있어야 함: {dark_bg_px}"
+    );
+}

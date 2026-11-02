@@ -28,7 +28,7 @@ use splash::SplashState;
 use std::path::{Path, PathBuf};
 use strata_core::strata_tokens::{
     metrics::{CTX_BAR_HEIGHT, RIBBON_HEIGHT, RIBBON_TILE_SIZE, STATUS_BAR_HEIGHT, TAB_BAR_HEIGHT},
-    tokens::{ACTION, CLAY_INK, CLAY_WASH, DESK, EDGE, GROUND, INK, LINE, WASH},
+    tokens::{ACTION, CLAY_INK, CLAY_WASH, DESK, EDGE, GROUND, INK, LINE, SURFACE, WASH},
 };
 use strata_core::{
     ArtifactCategory, BeadDrillType, BeadSubtype, HandleAttachmentKind, ScalePreset, SherdSubtype,
@@ -50,6 +50,7 @@ use strata_section::{
     OccludedDashedSpan, PlaneSliceResult,
 };
 use strata_shade::RubbingRenderParams;
+use theme::ThemeMode;
 use view3d_pane::{render_view3d_pane_egui, View3DPaneState};
 
 #[derive(Debug)]
@@ -1056,16 +1057,9 @@ impl eframe::App for StrataStudioApp {
             }
         }
 
-        show_active_dialog(ctx, &mut self.active_dialog, self.dark_mode);
+        let theme_mode = ThemeMode::from_bool(self.dark_mode);
 
-        // 다크 모드 전환 시에만 전역 비주얼을 갱신한다(매 프레임 갱신 금지).
-        if self.theme_applied_dark != Some(self.dark_mode) {
-            crate::theme::apply_app_visuals(ctx, self.dark_mode);
-            self.theme_applied_dark = Some(self.dark_mode);
-        }
-        self.view3d_state.dark_mode = self.dark_mode;
-
-        let chrome = crate::theme::chrome_for(self.dark_mode);
+        let chrome = crate::theme::chrome_for(theme_mode);
         let wash = egui::Color32::from_rgb(WASH.rgb[0], WASH.rgb[1], WASH.rgb[2]);
         let hanji = chrome.panel;
         let surface = chrome.panel;
@@ -1145,7 +1139,16 @@ impl eframe::App for StrataStudioApp {
                         let btn = egui::Button::new(
                             egui::RichText::new(format!("{}. {}", idx + 1, short_title))
                                 .size(11.5)
-                                .color(if is_sel { hanji } else { ink }),
+                                // 선택 슬롯은 먹 바탕이므로 양쪽 모드에서 흰 글자(명암비 확보).
+                                .color(if is_sel {
+                                    egui::Color32::from_rgb(
+                                        SURFACE.rgb[0],
+                                        SURFACE.rgb[1],
+                                        SURFACE.rgb[2],
+                                    )
+                                } else {
+                                    ink
+                                }),
                         )
                         .fill(if is_sel { ink } else { wash })
                         .corner_radius(4.0);
@@ -1190,7 +1193,7 @@ impl eframe::App for StrataStudioApp {
                         }
                     }
                     ui.checkbox(&mut self.sheet_full_tab_mode, "Tab 도판확대");
-                    ui.checkbox(&mut self.dark_mode, "다크 모드");
+                    ui.checkbox(&mut self.dark_mode, theme_mode.toggle_label_kr());
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some(gpu_info) = self.detected_gpus.get(self.selected_gpu_idx) {
@@ -1267,6 +1270,16 @@ impl eframe::App for StrataStudioApp {
                     });
                 });
             });
+
+        // 체크박스보다 뒤에서 전역 비주얼을 갱신하므로 토글 당일 프레임에 바로 반영된다(1프레임 지연 없음).
+        // 다크 모드 전환 시에만 갱신한다(매 프레임 갱신 금지).
+        if self.theme_applied_dark != Some(self.dark_mode) {
+            crate::theme::apply_app_visuals(ctx, theme_mode);
+            self.theme_applied_dark = Some(self.dark_mode);
+        }
+        self.view3d_state.dark_mode = self.dark_mode;
+        self.sheet_state.dark_mode = self.dark_mode;
+        show_active_dialog(ctx, &mut self.active_dialog, self.dark_mode);
 
         // 전체 화면 폭·높이를 최대한 확장하여 3D(직상방 동심원 방안지 + 정면 스캐너 입면)와 2D 실측 방안지로 배분!
         egui::CentralPanel::default()

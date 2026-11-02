@@ -92,10 +92,17 @@ pub fn render_topdown_concentric_plan_rgba(
 ) -> RgbaImage {
     let w_usize = width.max(32) as usize;
     let h_usize = height.max(32) as usize;
+    // 다크 모드에서는 뷰포트 바탕을 밤 작업대로 칠한다(격자·유물 색상은 불변).
+    // 캐시키에 dark_mode이 포함되므로 모드 전환 시 다시 렌더링된다.
+    let bg = if state.dark_mode {
+        crate::theme::dark::DESK
+    } else {
+        SURFACE.rgb
+    };
     let mut img = RgbaImage::from_pixel(
         w_usize as u32,
         h_usize as u32,
-        Rgba([SURFACE.rgb[0], SURFACE.rgb[1], SURFACE.rgb[2], 255]),
+        Rgba([bg[0], bg[1], bg[2], 255]),
     );
     let mut zbuf = vec![f32::INFINITY; w_usize * h_usize];
 
@@ -241,10 +248,15 @@ pub fn render_mesh_zbuffer_rgba(
 ) -> RgbaImage {
     let w_usize = width.max(16) as usize;
     let h_usize = height.max(16) as usize;
+    let bg = if state.dark_mode {
+        crate::theme::dark::DESK
+    } else {
+        SURFACE.rgb
+    };
     let mut img = RgbaImage::from_pixel(
         w_usize as u32,
         h_usize as u32,
-        Rgba([SURFACE.rgb[0], SURFACE.rgb[1], SURFACE.rgb[2], 255]),
+        Rgba([bg[0], bg[1], bg[2], 255]),
     );
     let mut zbuf = vec![f32::INFINITY; w_usize * h_usize];
 

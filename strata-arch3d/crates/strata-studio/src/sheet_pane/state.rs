@@ -47,6 +47,8 @@ pub struct SheetPaneState {
     pub(crate) cached_bottom_tex: Option<egui::TextureHandle>,
     /// 곡면 전개 탁본의 실제 물리 크기 `[둘레 mm, 높이 mm]` (`None` = 평면 탁본)
     pub unrolled_size_mm: Option<[f64; 2]>,
+    /// 화면 UI 다크 모드 (종이 위 칩·출력물은 불변, 창 바탕 문구만 테마 대응).
+    pub dark_mode: bool,
 }
 
 impl std::fmt::Debug for SheetPaneState {
@@ -100,6 +102,7 @@ impl Default for SheetPaneState {
             cached_back_tex: None,
             cached_bottom_tex: None,
             unrolled_size_mm: None,
+            dark_mode: false,
         }
     }
 }
