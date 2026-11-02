@@ -38,7 +38,18 @@ pub struct GateCheckResult {
     pub detail: String,
 }
 
-fn build_synthetic_vessel_mesh(name: &str, radius_mm: f64, height_mm: f64) -> TriMesh {
+/// B9: 퇴화 입력(0 이하·비유한 치수)은 패닉 대신 `Err`로 복구한다.
+fn build_synthetic_vessel_mesh(
+    name: &str,
+    radius_mm: f64,
+    height_mm: f64,
+) -> Result<TriMesh, StrataError> {
+    if !radius_mm.is_finite() || !height_mm.is_finite() || radius_mm <= 0.0 || height_mm <= 0.0 {
+        return Err(StrataError::EmptyOrInvalidMesh {
+            vertices: 0,
+            faces: 0,
+        });
+    }
     let mut positions = Vec::new();
     let mut triangles = Vec::new();
     let nu = 36usize;
@@ -63,8 +74,11 @@ fn build_synthetic_vessel_mesh(name: &str, radius_mm: f64, height_mm: f64) -> Tr
         }
     }
     match TriMesh::from_positions_and_triangles(name, positions, triangles) {
-        Ok(m) => m,
-        Err(_) => unreachable!("synthetic vessel has >= 3 vertices and >= 1 triangle"),
+        Ok(m) => Ok(m),
+        Err(_) => Err(StrataError::EmptyOrInvalidMesh {
+            vertices: 0,
+            faces: 0,
+        }),
     }
 }
 
@@ -73,7 +87,18 @@ pub fn run_v1_to_v8_verification_harness() -> Vec<GateCheckResult> {
     let mut results = Vec::with_capacity(8);
 
     // V1: Core 16B Vertex, CornerTable, Stackless LBVH, 3-Part Error Contract
-    let mesh = build_synthetic_vessel_mesh("v1_test_vessel", 55.0, 92.0);
+    let mesh = match build_synthetic_vessel_mesh("v1_test_vessel", 55.0, 92.0) {
+        Ok(m) => m,
+        Err(e) => {
+            results.push(GateCheckResult {
+                gate_id: "V1",
+                title: "Core 16B 정점·LBVH·3단 오류 계약",
+                passed: false,
+                detail: format!("합성 메쉬 생성 실패(복구됨, 패닉 없음): {e:?}"),
+            });
+            return results;
+        }
+    };
     let bvh = StacklessLbvh::build(&mesh);
     let gpu_v0 = GpuVertex16 {
         pos_quantized: [32768, 32768, 32768],
@@ -347,7 +372,7 @@ pub fn generate_screenshot_tour_and_golden_outputs(
     let vessel_mesh = if p_7obj.exists() {
         load_any_mesh(p_7obj)?
     } else {
-        build_synthetic_vessel_mesh("7지구 9호-7", 62.5, 118.4)
+        build_synthetic_vessel_mesh("7지구 9호-7", 62.5, 118.4)?
     };
 
     let vslice = slice_mesh_with_fixed_plane(
@@ -412,7 +437,7 @@ pub fn generate_screenshot_tour_and_golden_outputs(
     written.push(p3_path.display().to_string());
 
     // 4. 04_tab3_bead_2b_micro_section.png
-    let bead_mesh = build_synthetic_vessel_mesh("bead_2b", 4.2, 11.5);
+    let bead_mesh = build_synthetic_vessel_mesh("bead_2b", 4.2, 11.5)?;
     let m_bead = compute_artifact_measurements(&bead_mesh, ArtifactCategory::BeadJade);
     let occ = infer_occluded_dashed_spans(
         &[vec![[1.1, 11.5], [0.6, 5.8]], vec![[0.6, 5.7], [1.1, 0.0]]],
@@ -580,4 +605,24 @@ pub fn generate_screenshot_tour_and_golden_outputs(
     written.push(rep_path.display().to_string());
 
     Ok(written)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_degenerate_synthetic_mesh_returns_error_instead_of_panicking() {
+        // B9: 퇴화 치수(0·음수·NaN) 합성 메쉬는 Err로 복구되어야 한다.
+        for (r, h) in [(0.0, 92.0), (-5.0, 92.0), (55.0, 0.0), (f64::NAN, 92.0)] {
+            assert!(
+                build_synthetic_vessel_mesh("퇴화 합성", r, h).is_err(),
+                "퇴화 치수(r={r}, h={h})는 Err이어야 함"
+            );
+        }
+        assert!(
+            build_synthetic_vessel_mesh("정상 합성", 55.0, 92.0).is_ok(),
+            "정상 치수는 Ok여야 함"
+        );
+    }
 }

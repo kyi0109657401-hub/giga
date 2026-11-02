@@ -379,7 +379,7 @@ impl StrataStudioApp {
         } else {
             // 창을 0.1초 만에 즉시 띄우기 위해 첫 프레임에서는 경량 프리셋 슬롯을 먼저 넣고,
             // 창이 화면에 그려진 직후(frame >= 2) 실제 고용량 스캔 OBJ 유물을 로드한다!
-            slots.push(Self::make_preset_slot(
+            if let Some(slot) = Self::make_preset_slot(
                 "실측 스캔 유물 불러오는 중...",
                 ArtifactCategory::CompleteVessel,
                 None,
@@ -387,7 +387,9 @@ impl StrataStudioApp {
                 None,
                 58.0,
                 64.0,
-            ));
+            ) {
+                slots.push(slot);
+            }
             true
         };
 
@@ -516,7 +518,7 @@ impl StrataStudioApp {
         }
 
         if slots.is_empty() {
-            slots.push(Self::make_preset_slot(
+            if let Some(slot) = Self::make_preset_slot(
                 "표준 발굴 유물 (기본 실측 샘플)",
                 ArtifactCategory::CompleteVessel,
                 None,
@@ -524,10 +526,14 @@ impl StrataStudioApp {
                 None,
                 58.0,
                 64.0,
-            ));
+            ) {
+                slots.push(slot);
+            }
         }
     }
 
+    /// B9: 퇴화 입력(0 이하·비유한 치수)에는 패닉 대신 `None`을 돌려준다.
+    /// 호출자는 슬롯을 그냥 건너뛰고, 실측 슬롯 로드가 이어진다.
     fn make_preset_slot(
         title: &str,
         category: ArtifactCategory,
@@ -536,7 +542,11 @@ impl StrataStudioApp {
         bead_drill_type: Option<BeadDrillType>,
         radius_mm: f64,
         height_mm: f64,
-    ) -> ArtifactSlotEntry {
+    ) -> Option<ArtifactSlotEntry> {
+        if !radius_mm.is_finite() || !height_mm.is_finite() || radius_mm <= 0.0 || height_mm <= 0.0
+        {
+            return None;
+        }
         let mut positions = Vec::new();
         let mut triangles = Vec::new();
         let nu = 32usize;
@@ -562,9 +572,10 @@ impl StrataStudioApp {
         }
         let mesh = match TriMesh::from_positions_and_triangles(title, positions, triangles) {
             Ok(m) => m,
-            Err(_) => unreachable!("preset mesh has >= 3 vertices and >= 1 triangle"),
+            // 합성 파라미터가 퇴화해도 앱이 죽지 않고 빈 슬롯 반환으로 복구한다.
+            Err(_) => return None,
         };
-        ArtifactSlotEntry::from_mesh(
+        Some(ArtifactSlotEntry::from_mesh(
             title,
             None,
             category,
@@ -572,7 +583,7 @@ impl StrataStudioApp {
             bead_subtype,
             bead_drill_type,
             mesh,
-        )
+        ))
     }
 
     fn apply_chs_report_template(&mut self, tpl: ChsReportTemplate) {
@@ -1739,7 +1750,8 @@ mod tests {
             None,
             60.0,
             70.0,
-        );
+        )
+        .expect("정상 치수 프리셋은 반드시 만들어져야 함");
         let mut view3d_state = View3DPaneState::default();
         let mut sheet_state = SheetPaneState::default();
         let ctx = egui::Context::default();
@@ -1853,6 +1865,39 @@ mod tests {
         assert!(
             text.contains(&format!("{:.1}mm", m.mean_wall_thickness_mm)),
             "상단바 두께가 리포트와 다름: {text}"
+        );
+    }
+
+    #[test]
+    fn test_degenerate_preset_slot_returns_none_instead_of_panicking() {
+        // B9: 퇴화 입력(0·음수·NaN 치수)에도 패닉 없이 None으로 복구되어야 한다.
+        for (r, h) in [(0.0, 64.0), (-5.0, 64.0), (58.0, 0.0), (f64::NAN, 64.0)] {
+            let slot = StrataStudioApp::make_preset_slot(
+                "퇴화 프리셋",
+                ArtifactCategory::CompleteVessel,
+                None,
+                None,
+                None,
+                r,
+                h,
+            );
+            assert!(
+                slot.is_none(),
+                "퇴화 치수(r={r}, h={h})는 슬롯을 만들면 안 됨"
+            );
+        }
+        assert!(
+            StrataStudioApp::make_preset_slot(
+                "정상 프리셋",
+                ArtifactCategory::CompleteVessel,
+                None,
+                None,
+                None,
+                58.0,
+                64.0,
+            )
+            .is_some(),
+            "정상 치수는 슬롯이 만들어져야 함"
         );
     }
 }
