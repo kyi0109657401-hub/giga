@@ -961,3 +961,197 @@ fn test_msii_mix_weights_sum_to_one() {
         "MSII 혼합 가중치 합이 1이 아님: {sum}"
     );
 }
+
+#[test]
+fn test_relief_percentile_95_scale_clamps_and_selects() {
+    // ① Rubbing.cpp:357-359 이식: |D| 95백분위 + [0.06, 1.5] 클램프.
+    let mut uniform = vec![0.5f32; 100];
+    assert!((relief_percentile_95_scale(&mut uniform) - 0.5).abs() < 1e-6);
+    let mut ramp: Vec<f32> = (0..100).map(|i| i as f32 * 0.01).collect();
+    let s = relief_percentile_95_scale(&mut ramp);
+    assert!((s - 0.95).abs() < 1e-4, "95번째 백분위여야 함: {s}");
+    let mut huge: Vec<f32> = (0..100).map(|i| i as f32).collect();
+    assert!((relief_percentile_95_scale(&mut huge) - 1.5).abs() < 1e-6);
+    let mut tiny = vec![0.001f32; 50];
+    assert!((relief_percentile_95_scale(&mut tiny) - 0.06).abs() < 1e-6);
+    let mut empty: Vec<f32> = Vec::new();
+    assert!((relief_percentile_95_scale(&mut empty) - 1.0).abs() < 1e-6);
+}
+
+fn make_flat_bump_mesh() -> TriMesh {
+    // 넓은 양각(지름 60mm·높이 2mm 완만 돔) + 평탄 바탕 — 백화 재현용.
+    let n = 61usize;
+    let mut positions = Vec::with_capacity(n * n);
+    for iy in 0..n {
+        for ix in 0..n {
+            let x = -60.0 + 120.0 * (ix as f64) / ((n - 1) as f64);
+            let y = -60.0 + 120.0 * (iy as f64) / ((n - 1) as f64);
+            let r = (x * x + y * y).sqrt();
+            let z = if r < 30.0 {
+                2.0 * (r / 30.0 * std::f64::consts::FRAC_PI_2).cos()
+            } else {
+                0.0
+            };
+            positions.push([x, y, z]);
+        }
+    }
+    let mut triangles = Vec::with_capacity(2 * (n - 1) * (n - 1));
+    for iy in 0..(n - 1) {
+        for ix in 0..(n - 1) {
+            let a = (iy * n + ix) as u32;
+            let b = a + 1;
+            let c = a + n as u32;
+            let d = c + 1;
+            triangles.push([a, b, d]);
+            triangles.push([a, d, c]);
+        }
+    }
+    TriMesh::from_positions_and_triangles("flat_bump", positions, triangles).expect("valid")
+}
+
+fn mean_ink_in_disk(img: &RgbaImage, cx: u32, cy: u32, r: u32) -> f64 {
+    let mut sum = 0.0f64;
+    let mut cnt = 0u64;
+    for y in cy.saturating_sub(r)..=(cy + r).min(img.height() - 1) {
+        for x in cx.saturating_sub(r)..=(cx + r).min(img.width() - 1) {
+            let dx = x as i64 - cx as i64;
+            let dy = y as i64 - cy as i64;
+            if dx * dx + dy * dy > (r as i64) * (r as i64) {
+                continue;
+            }
+            let p = img.get_pixel(x, y);
+            if p.0[3] == 0 {
+                continue;
+            }
+            sum += f64::from(p.0[0]);
+            cnt += 1;
+        }
+    }
+    assert!(cnt > 0, "디스크에 칠해진 픽셀이 없음");
+    sum / cnt as f64
+}
+
+#[test]
+fn test_broad_relief_does_not_wash_out_to_white() {
+    // ① 백화: 넓은 양각 윗면이 순백으로 지워지면 안 된다.
+    // 돔 정상부·평탄 바탕 모두 먹을 머금어야 한다 (순백 255 대비 확연히 어둡게).
+    let mesh = make_flat_bump_mesh();
+    let params = AcademicRubbingParams::default();
+    let img = render_orthographic_rubbing_rgba_with_params(
+        &mesh,
+        PlateRasterKind::BottomPlanRubbing,
+        0.0,
+        &params,
+        200,
+        200,
+    );
+    // 메쉬 120mm → 200px: 중심(100,100)=돔 정상, (150,50)=평탄 바탕(돔·가장자리 중간).
+    // 구 코드(고정 이득+pad 0.44)에서는 둘 다 230 이상 순백으로 지워진다.
+    let top = mean_ink_in_disk(&img, 100, 100, 12);
+    let flat = mean_ink_in_disk(&img, 150, 50, 8);
+    assert!(top < 180.0, "돔 정상부가 순백으로 지워짐: {top}");
+    assert!(flat < 190.0, "평탄 바탕이 순백으로 지워짐: {flat}");
+}
+
+#[test]
+fn test_msii_normalization_adapts_to_relief_scale() {
+    // ① 자동정규화: 문양 깊이가 1/20로 줄어도 명암 대비가 유지되어야 한다.
+    // 고정 이득이면 완만 문양이 하얗게 날아간다.
+    let mesh = make_patterned_bowl_mesh();
+    let mean_z: f64 =
+        mesh.positions.iter().map(|p| p[2]).sum::<f64>() / mesh.positions.len() as f64;
+    let flat_pos: Vec<[f64; 3]> = mesh
+        .positions
+        .iter()
+        .map(|p| [p[0], p[1], mean_z + (p[2] - mean_z) * 0.05])
+        .collect();
+    let flat_mesh = TriMesh::from_positions_and_triangles(
+        "patterned_bowl_flat",
+        flat_pos,
+        mesh.triangles.clone(),
+    )
+    .expect("valid");
+    let params = AcademicRubbingParams::default();
+    let contrast_of = |m: &TriMesh| {
+        let img = render_orthographic_rubbing_rgba_with_params(
+            m,
+            PlateRasterKind::BottomPlanRubbing,
+            0.0,
+            &params,
+            200,
+            200,
+        );
+        let vals: Vec<f64> = img
+            .pixels()
+            .filter(|p| p.0[3] != 0)
+            .map(|p| f64::from(p.0[0]))
+            .collect();
+        assert!(!vals.is_empty(), "칠해진 픽셀이 없음");
+        let mean = vals.iter().sum::<f64>() / vals.len() as f64;
+        let var = vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / vals.len() as f64;
+        var.sqrt()
+    };
+    let c_full = contrast_of(&mesh);
+    let c_flat = contrast_of(&flat_mesh);
+    assert!(
+        c_flat >= c_full * 0.7,
+        "완만 문양 대비가 유지되어야 함: full={c_full:.1} flat={c_flat:.1}"
+    );
+}
+
+fn mean_ink_in_annulus(img: &RgbaImage, cx: u32, cy: u32, r0: u32, r1: u32) -> f64 {
+    let mut sum = 0.0f64;
+    let mut cnt = 0u64;
+    let r1sq = (r1 as i64) * (r1 as i64);
+    let r0sq = (r0 as i64) * (r0 as i64);
+    for y in cy.saturating_sub(r1)..=(cy + r1).min(img.height() - 1) {
+        for x in cx.saturating_sub(r1)..=(cx + r1).min(img.width() - 1) {
+            let dx = x as i64 - cx as i64;
+            let dy = y as i64 - cy as i64;
+            let d2 = dx * dx + dy * dy;
+            if d2 < r0sq || d2 > r1sq {
+                continue;
+            }
+            let p = img.get_pixel(x, y);
+            if p.0[3] == 0 {
+                continue;
+            }
+            sum += f64::from(p.0[0]);
+            cnt += 1;
+        }
+    }
+    assert!(cnt > 0, "고리 영역에 칠해진 픽셀이 없음");
+    sum / cnt as f64
+}
+
+#[test]
+fn test_convex_and_concave_relief_keep_their_sign() {
+    // ③ 부호 소실: 양각(돔) 사면은 먹을 머금고, 음각(크레이터) 사면은 한지로 남아야 한다.
+    // H 부호를 지우면(abs*화면부호) 둘의 명암 순서가 뒤바뀌거나 같아진다.
+    let bump = make_flat_bump_mesh();
+    let mut crater_pos = bump.positions.clone();
+    for p in &mut crater_pos {
+        p[2] = -p[2];
+    }
+    let crater =
+        TriMesh::from_positions_and_triangles("flat_crater", crater_pos, bump.triangles.clone())
+            .expect("valid");
+    let params = AcademicRubbingParams::default();
+    let render = |m: &TriMesh| {
+        render_orthographic_rubbing_rgba_with_params(
+            m,
+            PlateRasterKind::BottomPlanRubbing,
+            0.0,
+            &params,
+            200,
+            200,
+        )
+    };
+    // 돔 사면 고리(r 8..20px) vs 크레이터 사면 고리: 양각이 확연히 어두워야 한다.
+    let bump_ring = mean_ink_in_annulus(&render(&bump), 100, 100, 8, 20);
+    let crater_ring = mean_ink_in_annulus(&render(&crater), 100, 100, 8, 20);
+    assert!(
+        bump_ring + 15.0 < crater_ring,
+        "양각 사면이 음각 사면보다 어두워야 함: bump={bump_ring:.1} crater={crater_ring:.1}"
+    );
+}

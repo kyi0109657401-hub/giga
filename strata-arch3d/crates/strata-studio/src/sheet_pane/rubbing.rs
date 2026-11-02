@@ -239,15 +239,20 @@ pub fn msii_radii_for_extent(extent_px: u32) -> [u32; 4] {
 /// 조각 메쉬의 부분 extent가 아니다.
 pub const SEAM_SPAN_FRACTION: f64 = 0.45;
 
-/// MSII 다중스케일 결합 상수 (B8: 매직넘버 명명, 값 불변).
+/// MSII 다중스케일 결합 상수 (B8 명명 + ① 정규화 이식).
 ///
-/// `curv_cancel_a_b = ((z_c - z_ra) - blend_ab * (z_c - z_rb)) * gain_ab` 형태의
-/// (이득, 이전 스케일 혼합비) 쌍과 최종 혼합비(합 1.0 고정)이다.
-/// f32 정밀도로 기존 리터럴과 비트 동일.
-pub const MSII_CANCEL_1_2: (f32, f32) = (9.5, 0.333_333);
-pub const MSII_CANCEL_2_4: (f32, f32) = (5.6, 0.20);
-pub const MSII_CANCEL_4_8: (f32, f32) = (3.2, 0.22);
+/// 원시 결합 `d_ab = (z_c - z_ra) - blend_ab * (z_c - z_rb)` 의 이전 스케일
+/// 혼합비와 최종 혼합비(합 1.0 고정)이다. 고정 이득(9.5/5.6/3.2) 대신
+/// |D| 95백분위로 스케일을 맞추므로 이득 상수는 삭제했다.
+pub const MSII_BLEND_1_2: f32 = 0.333_333;
+pub const MSII_BLEND_2_4: f32 = 0.20;
+pub const MSII_BLEND_4_8: f32 = 0.22;
 pub const MSII_MIX_WEIGHTS: [f32; 3] = [0.46, 0.34, 0.20];
+/// 삼각형 플랫 법선 혼합비 (② 격자 자국: 0.62 → 0.40 하향).
+///
+/// 플랫 법선 비중이 크면 삼각형 경계마다 법선이 꺾여 격자 줄무늬가 찍힌다.
+/// 정점 법선(Nelson Max) 쪽으로 기울여 경계를 부드럽게 넘긴다.
+pub const FLAT_NORMAL_MIX: f32 = 0.40;
 /// PCV 차폐 지수 감쇠율 (B8).
 pub const AO_FALLOUT_RATE: f32 = 2.2;
 /// Vergne Radiance Scaling 조도 기준·기울기 (B8).
@@ -269,6 +274,22 @@ pub fn is_seam_spanning_triangle(u: [f64; 3], total_width_mm: f64) -> bool {
     // 전개 범위는 [-πR, +πR] = [-w/2, +w/2] 이므로,
     // 양 끝 임계(±45% 폭) 바깥에 동시에 걸린 삼각형만 봉합선 스패닝으로 본다.
     lo < -total_width_mm * SEAM_SPAN_FRACTION && hi > total_width_mm * SEAM_SPAN_FRACTION
+}
+
+/// |D| 95백분위 스케일 (Rubbing.cpp:357-358 이식).
+///
+/// 유효 픽셀 relief 절댓값 분포에서 95번째 백분위를 취해 [0.06, 1.5]로 클램프한다.
+/// 유물마다 문양 깊이가 달라 고정 이득(9.5/5.6/3.2)을 쓰지 않는다.
+/// 입력이 비면 1.0을 돌려준다.
+pub fn relief_percentile_95_scale(mags: &mut [f32]) -> f32 {
+    if mags.is_empty() {
+        return 1.0;
+    }
+    let q = ((mags.len() as f64 * 0.95) as usize).min(mags.len() - 1);
+    mags.select_nth_unstable_by(q, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    mags[q].clamp(0.06, 1.5)
 }
 
 pub fn render_orthographic_rubbing_rgba_with_params(
@@ -490,9 +511,11 @@ pub fn render_orthographic_rubbing_rgba_with_params(
                         vny = -vny;
                         vnz = -vnz;
                     }
-                    let nx = 0.62 * fn_proj[0] + 0.38 * vnx;
-                    let ny = 0.62 * fn_proj[1] + 0.38 * vny;
-                    let nz = 0.62 * fn_proj[2] + 0.38 * vnz;
+                    // ② 격자 자국: 플랫 비중을 낮춰 삼각형 경계 꺾임을 완화한다.
+                    let vert_mix = 1.0 - FLAT_NORMAL_MIX;
+                    let nx = FLAT_NORMAL_MIX * fn_proj[0] + vert_mix * vnx;
+                    let ny = FLAT_NORMAL_MIX * fn_proj[1] + vert_mix * vny;
+                    let nz = FLAT_NORMAL_MIX * fn_proj[2] + vert_mix * vnz;
                     let nlen = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-5);
                     nbuf[idx] = [nx / nlen, ny / nlen, nz / nlen];
                     curv_buf[idx] = w0 * mc0 + w1 * mc1 + w2 * mc2;
@@ -544,10 +567,52 @@ pub fn render_orthographic_rubbing_rgba_with_params(
     let detail_boost = params.msii_detail_boost.clamp(0.4, 3.0);
     let k_sig = params.sigmoid_contrast.clamp(2.0, 16.0);
     let contact_thresh = params.contact_threshold.clamp(-0.45, 0.25);
-    let pad_threshold = (0.44 + contact_thresh).clamp(0.10, 0.72);
+    // ① 백화: pad 기준을 낮춰 넓은 양각 윗면이 순백으로 지워지지 않게 한다.
+    // 평탄부(norm 0.5)가 먹을 머금고, 깊은 음각(norm→0)만 한지로 남는다.
+    let pad_threshold = contact_thresh.clamp(-0.40, 0.72);
     let curv_weight = (k_sig * 0.80).clamp(2.0, 14.0);
 
     let mut contact_map = vec![0.0_f32; w * h];
+    // ①-1 패스 A (병렬): MSII 원시 응답 + 공동 깊이 산출.
+    // 고정 이득(9.5/5.6/3.2)을 곱하지 않고 원시 결합값만 모은다 — 스케일은 95백분위로 맞춘다.
+    let msii_r = msii_radii_for_extent(w.max(h) as u32);
+    let mut msii_raw = vec![0.0f32; w * h];
+    let mut cavity_buf = vec![0.0f32; w * h];
+    msii_raw
+        .par_chunks_mut(w)
+        .zip(cavity_buf.par_chunks_mut(w))
+        .enumerate()
+        .for_each(|(y, (raw_row, cav_row))| {
+            for x in 0..w {
+                let idx = y * w + x;
+                if !hit_buf[idx] {
+                    continue;
+                }
+                let z_c = zbuf[idx];
+                let z_r1 = box_mean_z_fast(x, y, msii_r[0] as usize);
+                let z_r2 = box_mean_z_fast(x, y, msii_r[1] as usize);
+                let z_r4 = box_mean_z_fast(x, y, msii_r[2] as usize);
+                let z_r8 = box_mean_z_fast(x, y, msii_r[3] as usize);
+                let d1 = (z_c - z_r1) - MSII_BLEND_1_2 * (z_c - z_r2);
+                let d2 = (z_c - z_r2) - MSII_BLEND_2_4 * (z_c - z_r4);
+                let d3 = (z_c - z_r4) - MSII_BLEND_4_8 * (z_c - z_r8);
+                raw_row[x] =
+                    MSII_MIX_WEIGHTS[0] * d1 + MSII_MIX_WEIGHTS[1] * d2 + MSII_MIX_WEIGHTS[2] * d3;
+                cav_row[x] = (z_r4 - z_c).max(0.0);
+            }
+        });
+
+    // ①-2: |D| 95백분위 자동정규화 (Rubbing.cpp:357-358 이식).
+    // 유물마다 문양 깊이가 달라 고정 이득을 쓰지 않는다.
+    let mut mags: Vec<f32> = Vec::with_capacity(w * h / 2);
+    for (i, &hit) in hit_buf.iter().enumerate() {
+        if hit {
+            mags.push(msii_raw[i].abs());
+        }
+    }
+    let norm_scale = relief_percentile_95_scale(&mut mags);
+
+    // ①-3 패스 B (병렬): 정규화 + AO + 접촉 확률 + 출력.
     contact_map
         .par_chunks_mut(w)
         .enumerate()
@@ -567,42 +632,23 @@ pub fn render_orthographic_rubbing_rgba_with_params(
                 let n_d = nbuf[yd * w + x];
 
                 // (a) Vergne et al. (2010) Screen-Space Radiance Scaling (shader.wgsl line 32)
+                // ② 격자 자국: 미분 고스트 항(dn_edge)을 제거한다.
+                // 삼각형 경계마다 양수로 튀어 격자 줄무늬를 만들던 항이다.
                 let dn_x = (n_r[0] - n_l[0]) * 0.5;
                 let dn_z = (n_u[2] - n_d[2]) * 0.5;
-                let dn_edge = ((n_r[0] - n_l[0]).hypot(n_r[2] - n_l[2])
-                    + (n_u[0] - n_d[0]).hypot(n_u[2] - n_d[2]))
-                    * 0.55;
-                let screen_curv = (dn_x + dn_z) * 1.35 + dn_edge * 0.65;
+                let screen_curv = (dn_x + dn_z) * 1.35;
 
                 // (b) Meyer et al. (2003) Cotangent Mean Curvature (H) + Modified Frangi Vesselness
-                let cot_h = (curv_buf[idx].abs() * screen_curv.signum()).clamp(-1.5, 1.5);
+                // ③ 부호 소실: abs()*screen부호 대신 H 자체 부호를 보존한다.
+                let cot_h = curv_buf[idx].clamp(-1.5, 1.5);
                 let frangi_v = (frangi_buf[idx] * 0.65).clamp(0.0, 1.2);
 
-                // (c) Mara et al. (2010) 다중 스케일 구면 적분 불변량(MSII) & 곡면 기울기 제거 DoG
-                let z_c = zbuf[idx];
+                // (c) Mara et al. (2010) 다중 스케일 구면 적분 불변량(MSII).
                 // B-통일 고정점: 박스 반경을 렌더 크기에 비례시킨다(기준 180px → [1,2,4,8]).
-                let msii_r = msii_radii_for_extent(w.max(h) as u32);
-                let z_r1 = box_mean_z_fast(x, y, msii_r[0] as usize);
-                let z_r2 = box_mean_z_fast(x, y, msii_r[1] as usize);
-                let z_r4 = box_mean_z_fast(x, y, msii_r[2] as usize);
-                let z_r8 = box_mean_z_fast(x, y, msii_r[3] as usize);
-                let curv_cancel_1_2 =
-                    ((z_c - z_r1) - MSII_CANCEL_1_2.1 * (z_c - z_r2)) * MSII_CANCEL_1_2.0;
-                let curv_cancel_2_4 =
-                    ((z_c - z_r2) - MSII_CANCEL_2_4.1 * (z_c - z_r4)) * MSII_CANCEL_2_4.0;
-                let curv_cancel_4_8 =
-                    ((z_c - z_r4) - MSII_CANCEL_4_8.1 * (z_c - z_r8)) * MSII_CANCEL_4_8.0;
-                let msii_val = ((MSII_MIX_WEIGHTS[0] * curv_cancel_1_2
-                    + MSII_MIX_WEIGHTS[1] * curv_cancel_2_4
-                    + MSII_MIX_WEIGHTS[2] * curv_cancel_4_8)
-                    * detail_boost)
-                    .clamp(-1.8, 1.8);
+                let msii_val = (msii_raw[idx] / norm_scale * detail_boost).clamp(-1.8, 1.8);
 
                 // (d) 반경 제한 PCV Ambient Occlusion (타솔이 음각 홈 바닥에 닿지 못하는 차폐율)
-                let local_cavity_depth = (z_r4 - z_c).max(0.0);
-                let ao_val = (-local_cavity_depth * AO_FALLOUT_RATE)
-                    .exp()
-                    .clamp(0.05, 1.0);
+                let ao_val = (-cavity_buf[idx] * AO_FALLOUT_RATE).exp().clamp(0.05, 1.0);
 
                 // (e) raster_rubbing.rs lines 133-142: tanh 곡률 정규화 + Smoothstep 타솔 접촉 확률
                 let combined = 0.44 * msii_val
