@@ -12,6 +12,19 @@ use strata_core::{ScalePreset, TriMesh};
 use strata_export::{triangulate_polygon_ear_clipping, ComposedPlate2D, PlateRasterKind};
 use strata_measure::ArtifactMeasurementReport;
 
+/// 치수선 구경값 결정 (단일 원천 원칙).
+///
+/// 항상 측정 리포트값을 돌려준다. 그려진 폭이 달라도 숫자를 바꾸지 않는다 —
+/// 편차가 허용오차를 벗어나면 그리기 쪽(회전 중심·미러 합성·절단 범위)을 수정해야 한다.
+/// 리포트값이 없을 때만 그려진 폭으로 대체한다 (예외적 폴백).
+pub fn resolve_rim_label_width_mm(report_rim_mm: f64, drawn_span_mm: f64) -> f64 {
+    if report_rim_mm.is_finite() && report_rim_mm > 1.0 {
+        report_rim_mm
+    } else {
+        drawn_span_mm.max(0.0)
+    }
+}
+
 /// 우측 `73%` (또는 `Tab` 키 `100%`) 2D 실측 도판 작업대(`SheetPane`)를 렌더링한다.
 #[allow(clippy::too_many_arguments)]
 pub fn render_sheet_pane_egui(
@@ -998,20 +1011,18 @@ pub fn render_sheet_pane_egui(
                 let dim_w_px = (snap_to_standard_weight_mm(state.line_style.dim_width_mm) * scale)
                     .clamp(0.9, 3.0);
 
-                // (a) 상단 수평 구경 화살표 치수선 — 구연부 **실측 구경**에 맞춰 표시한다.
+                // (a) 상단 수평 구경 화살표 치수선 — **항상 실측 구경(리포트값)** 을 표시한다 (단일 원천).
+                // 그려진 폭이 달라도 숫자를 바꾸지 않는다. 편차가 허용오차를 벗어나면
+                // 그리기 쪽(회전 중심·미러 합성·절단 범위)을 수정해야 한다.
                 let span_px = (rx1 - rx0).abs();
                 let span_mm = if scale > 0.0 { span_px / scale } else { 0.0 };
-                let rim_mm = if report.rim_or_outer_diameter_mm > 1.0
-                    && span_mm > 1.0
-                    && report.rim_or_outer_diameter_mm <= (span_mm as f64) * 1.02
-                {
-                    report.rim_or_outer_diameter_mm
-                } else {
-                    span_mm as f64
-                };
+                let rim_mm = resolve_rim_label_width_mm(
+                    report.rim_or_outer_diameter_mm,
+                    span_mm as f64,
+                );
                 let cx_v = (rx0 + rx1) * 0.5;
-                let half_rim_px = if span_mm > 0.0 {
-                    span_px * 0.5 * (rim_mm / span_mm as f64) as f32
+                let half_rim_px = if scale > 0.0 && rim_mm > 0.0 {
+                    rim_mm as f32 * 0.5 * scale
                 } else {
                     span_px * 0.5
                 };

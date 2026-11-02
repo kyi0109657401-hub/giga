@@ -17,6 +17,7 @@ mod rubbing;
 mod state;
 mod widgets;
 
+pub(crate) use config::*;
 pub(crate) use offscreen::*;
 pub(crate) use render::*;
 pub(crate) use rubbing::*;

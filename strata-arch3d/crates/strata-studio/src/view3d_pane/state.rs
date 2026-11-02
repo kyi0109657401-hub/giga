@@ -2,7 +2,9 @@ use eframe::egui;
 use image::RgbaImage;
 use strata_core::{SurfaceRegion, TriMesh};
 
-use super::geometry::{clamp_ordered, extract_3d_plane_intersection_segments_full};
+use super::geometry::{
+    clamp_ordered, extract_3d_plane_intersection_segments_full, standard_light_direction,
+};
 use super::raster::{render_mesh_zbuffer_rgba, render_topdown_concentric_plan_rgba};
 
 /// 3D 뷰포트 셰이딩 모드 (`C++ View3DPane.cpp` + `MeshRaster.cpp` 1:1 대응).
@@ -106,6 +108,21 @@ pub fn compute_isotropic_render_dimensions(
     rect_h: f32,
     is_dragging: bool,
 ) -> (u32, u32) {
+    compute_isotropic_render_dimensions_hd(rect_w, rect_h, is_dragging, 1.0)
+}
+
+/// HiDPI(기기 픽셀 비율) 대응판: 물리 픽셀 기준으로 타겟을 잡아 LINEAR 확대 흐림을 없앤다.
+///
+/// 기존 저해상 타겟을 그대로 올리면 고배율 디스플레이에서 원본 텍스처가 정상인데도
+/// 표시 경로에서 뭉개졌다. `pixels_per_point`를 곱해 1:1 물리 해상도로 렌더링한다.
+/// 상한은 물리 px 기준(유휴 1600 · 드래그 1000)으로 둬 소프트웨어 래스터 폭주를 막는다.
+pub fn compute_isotropic_render_dimensions_hd(
+    rect_w: f32,
+    rect_h: f32,
+    is_dragging: bool,
+    pixels_per_point: f32,
+) -> (u32, u32) {
+    let dpr = pixels_per_point.clamp(1.0, 4.0);
     let rw = f64::from(rect_w.max(64.0));
     let rh = f64::from(rect_h.max(64.0));
     let max_dim = rw.max(rh);
@@ -114,7 +131,13 @@ pub fn compute_isotropic_render_dimensions(
     let s = (max_cap / max_dim).min(desired_mult).max(180.0 / max_dim);
     let w = (rw * s).round().max(64.0) as u32;
     let h = ((w as f64) * (rh / rw)).round().max(64.0) as u32;
-    (w, h)
+    if dpr <= 1.0 {
+        return (w, h);
+    }
+    let phys_cap = if is_dragging { 1000 } else { 1600 };
+    let pw = ((w as f32 * dpr).round() as u32).clamp(64, phys_cap);
+    let ph = ((h as f32 * dpr).round() as u32).clamp(64, phys_cap);
+    (pw, ph)
 }
 
 /// 유물 외경 반경(`artifact_radius_mm`)의 정확히 `1.20배(+20%)`가 되는 직상방·입면 동심원 방안지 반경을 계산한다.
@@ -273,16 +296,13 @@ impl Default for View3DPaneState {
 
 impl View3DPaneState {
     /// Image 2: 현재 광원 방위각(`light_azimuth_deg`)과 고도각(`light_elevation_deg`)으로부터 정규화된 3D 광원 방향 벡터를 산출한다.
+    /// 표준식 [`standard_light_direction`] 단일 출처 (B1 고정점) — 탁본 파이프라인과 같은 수치·같은 방향.
     #[inline]
     pub fn compute_light_direction_vector(&self) -> [f64; 3] {
-        let az_rad = f64::from(self.light_azimuth_deg).to_radians();
-        let el_rad = f64::from(self.light_elevation_deg.clamp(5.0, 88.0)).to_radians();
-        let cos_el = el_rad.cos();
-        let lx = cos_el * az_rad.sin();
-        let ly = -cos_el * az_rad.cos();
-        let lz = el_rad.sin();
-        let len = (lx * lx + ly * ly + lz * lz).sqrt().max(1e-9);
-        [lx / len, ly / len, lz / len]
+        standard_light_direction(
+            f64::from(self.light_azimuth_deg),
+            f64::from(self.light_elevation_deg),
+        )
     }
 
     pub fn effective_shader_mode(&self) -> View3DShaderMode {

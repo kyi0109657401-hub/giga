@@ -5,6 +5,7 @@ use strata_export::PlateRasterKind;
 use strata_measure::compute_artifact_measurements;
 
 use super::config::*;
+use super::render::resolve_rim_label_width_mm;
 use super::rubbing::*;
 use super::state::*;
 use super::widgets::*;
@@ -52,7 +53,14 @@ fn test_orthographic_rubbing_raster_produces_visible_ink_within_silhouette() {
         PlateRasterKind::BackInteriorRubbing,
         PlateRasterKind::BottomPlanRubbing,
     ] {
-        let img = render_orthographic_rubbing_rgba(&mesh, kind, 0.0, 75.0, 160, 160);
+        let img = render_orthographic_rubbing_rgba(
+            &mesh,
+            kind,
+            0.0,
+            RUBBING_STANDARD_INK_PCT,
+            RUBBING_STANDARD_RES_PX,
+            RUBBING_STANDARD_RES_PX,
+        );
         let mut opaque_px = 0usize;
         let mut ink_shaded_px = 0usize;
         for p in img.pixels() {
@@ -340,7 +348,7 @@ fn test_tdd5_full_bleed_archaeological_millimeter_graph_paper_grid() {
 fn test_tdd6_academic_msii_dog_sigmoid_digital_rubbing_contrast() {
     let mesh = make_patterned_bowl_mesh();
     let params = AcademicRubbingParams {
-        ink_density_pct: 80.0,
+        ink_density_pct: RUBBING_STANDARD_INK_PCT,
         msii_detail_boost: 1.45,
         sigmoid_contrast: 8.5,
         contact_threshold: -0.12,
@@ -352,8 +360,8 @@ fn test_tdd6_academic_msii_dog_sigmoid_digital_rubbing_contrast() {
         PlateRasterKind::FrontExteriorRubbing,
         0.0,
         &params,
-        220,
-        220,
+        RUBBING_STANDARD_RES_PX,
+        RUBBING_STANDARD_RES_PX,
     );
     let mut deep_ink_ridges = 0usize;
     let mut uninked_paper_grooves = 0usize;
@@ -384,8 +392,8 @@ fn test_tdd7_drag_roi_partial_rubbing_window_and_density_control() {
         PlateRasterKind::FrontExteriorRubbing,
         0.0,
         &state.rubbing_params,
-        200,
-        200,
+        RUBBING_STANDARD_RES_PX,
+        RUBBING_STANDARD_RES_PX,
     );
     let full_cimg =
         rgba_to_color_image_clipped_with_roi(&src, [10.0, 10.0, 110.0, 80.0], Some(-1), None);
@@ -787,4 +795,137 @@ fn test_dark_offscreen_keeps_plate_output_pixels_identical() {
         [255, 255, 255, 255],
         "다크 모드 용지가 흰색이 아님"
     );
+}
+
+#[test]
+fn test_msii_radii_scale_with_render_extent() {
+    // B-통일 고정점: 기준 180px에서 기존 고정값과 동일, 비율 유지.
+    assert_eq!(msii_radii_for_extent(180), [1, 2, 4, 8]);
+    assert_eq!(msii_radii_for_extent(90), [1, 1, 2, 4]);
+    assert_eq!(msii_radii_for_extent(360), [2, 4, 8, 16]);
+    assert_eq!(msii_radii_for_extent(48), [1, 1, 1, 2]);
+    assert_eq!(msii_radii_for_extent(240), [1, 3, 5, 11]);
+}
+
+#[test]
+fn test_rubbing_is_deterministic_across_repeated_renders() {
+    // B-통일 고정점: 사용자 세팅 없이 같은 입력이면 바이트 동일 탁본.
+    let mesh = make_patterned_bowl_mesh();
+    let params = AcademicRubbingParams::default();
+    assert_eq!(params.ink_density_pct, RUBBING_STANDARD_INK_PCT);
+    let a = render_orthographic_rubbing_rgba_with_params(
+        &mesh,
+        PlateRasterKind::FrontExteriorRubbing,
+        0.0,
+        &params,
+        RUBBING_STANDARD_RES_PX,
+        RUBBING_STANDARD_RES_PX,
+    );
+    let b = render_orthographic_rubbing_rgba_with_params(
+        &mesh,
+        PlateRasterKind::FrontExteriorRubbing,
+        0.0,
+        &params,
+        RUBBING_STANDARD_RES_PX,
+        RUBBING_STANDARD_RES_PX,
+    );
+    assert_eq!(
+        a.as_raw(),
+        b.as_raw(),
+        "같은 입력의 탁본이 다르면 일관성 위반"
+    );
+    assert!(a.pixels().any(|p| p[3] > 32), "탁본에 잉크가 있어야 함");
+}
+
+#[test]
+fn test_ddg_cache_key_distinguishes_same_size_meshes() {
+    // B2 고정점: 이름·개수가 같아도 내용이 다르면 다른 캐시 항목이어야 한다.
+    let mut mesh_a = make_patterned_bowl_mesh();
+    mesh_a.name = String::from("cache_probe_same_name");
+    let mut mesh_b = mesh_a.clone();
+    mesh_b.positions[10][2] += 7.5;
+    mesh_b.bbox.max[2] += 7.5;
+    assert_eq!(mesh_a.positions.len(), mesh_b.positions.len());
+    assert_eq!(mesh_content_hash(&mesh_a), mesh_content_hash(&mesh_a));
+    assert_ne!(
+        mesh_content_hash(&mesh_a),
+        mesh_content_hash(&mesh_b),
+        "내용이 다르면 해시가 달라야 함"
+    );
+    let ca = get_or_build_ddg_mesh(&mesh_a);
+    let cb = get_or_build_ddg_mesh(&mesh_b);
+    assert!(
+        !std::sync::Arc::ptr_eq(&ca, &cb),
+        "다른 내용의 메쉬가 같은 DDG 캐시를 타면 안 됨"
+    );
+}
+
+#[test]
+fn test_resolve_rim_label_width_mm_always_uses_report() {
+    // 추가분(치수 단일원천): 리드 재현 케이스 — 상단바 Φ125.2 vs 그려진 폭 109.4.
+    // 그려진 폭이 12% 좁아도 라벨은 리포트값을 써야 한다.
+    assert!((resolve_rim_label_width_mm(125.2, 109.4) - 125.2).abs() < 1e-9);
+    assert!((resolve_rim_label_width_mm(125.2, 140.0) - 125.2).abs() < 1e-9);
+    assert!((resolve_rim_label_width_mm(0.0, 109.4) - 109.4).abs() < 1e-9);
+    assert!((resolve_rim_label_width_mm(f64::NAN, 109.4) - 109.4).abs() < 1e-9);
+}
+
+#[test]
+fn test_plate_gauge_lines_use_report_values_across_flips() {
+    // 추가분: 상태바·도판(구경선/저경선)·치수선이 뒤집기 각도와 무관하게 리포트값과 일치해야 한다.
+    use strata_export::{compose_archaeological_plate, PlateComposeInput, PlateLayoutMode};
+    let mesh = make_patterned_bowl_mesh();
+    let m = compute_artifact_measurements(&mesh, ArtifactCategory::CompleteVessel);
+    assert!(m.rim_or_outer_diameter_mm > 1.0);
+    let mut poses = Vec::new();
+    for tilt in [0.0, 45.0, 90.0, 180.0, -90.0] {
+        poses.push((tilt, 0.0, 0.0));
+    }
+    poses.push((0.0, 90.0, 0.0));
+    poses.push((0.0, 0.0, 90.0));
+    for (tilt, yaw, roll) in poses {
+        let mut v3d = crate::view3d_pane::View3DPaneState::default();
+        v3d.tilt_deg = tilt;
+        v3d.active_section_angle_deg = yaw;
+        v3d.roll_deg = roll;
+        let vsec = crate::view3d_pane::slice_transformed_mesh_world_locked(&mesh, &v3d, true);
+        let plate = compose_archaeological_plate(&PlateComposeInput {
+            title: "뒤집기 정합",
+            measurements: &m,
+            vertical_section: &vsec,
+            horizontal_sections: &[],
+            occluded_spans: &[],
+            sherd_subtype: None,
+            sherd_strategy: None,
+            handle_attachment: None,
+            bead_subtype: None,
+            bead_drill_type: None,
+            wado_cut_ratio: None,
+            hemp_density_label: None,
+            flip_exterior_right: false,
+        });
+        assert_eq!(plate.mode, PlateLayoutMode::CompleteVesselStandard);
+        let gauge_width = |layer: &str| {
+            let xs: Vec<f64> = plate
+                .paths
+                .iter()
+                .filter(|p| p.layer_id == layer)
+                .flat_map(|p| p.points_mm.iter().map(|q| q[0]))
+                .collect();
+            assert!(
+                !xs.is_empty(),
+                "tilt={tilt} yaw={yaw} roll={roll}: {layer} 없음"
+            );
+            xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+                - xs.iter().cloned().fold(f64::INFINITY, f64::min)
+        };
+        assert!(
+            (gauge_width("구경_기준선") - m.rim_or_outer_diameter_mm).abs() < 1e-6,
+            "tilt={tilt} yaw={yaw} roll={roll}: 구경선이 리포트와 다름"
+        );
+        assert!(
+            (gauge_width("저경_기준선") - m.base_diameter_or_width_mm).abs() < 1e-6,
+            "tilt={tilt} yaw={yaw} roll={roll}: 저경선이 리포트와 다름"
+        );
+    }
 }

@@ -22,20 +22,58 @@ pub fn render_orthographic_rubbing_rgba(
     render_orthographic_rubbing_rgba_with_params(mesh, kind, psi_deg, &params, width, height)
 }
 
+/// 메쉬 내용물 결정론적 요약 (FNV-1a 64비트).
+/// 이름·개수가 같아도 내용이 다르면 해시가 달라져 낡은 DDG 캐시를 타지 않는다 (B2 고정점).
+/// 부동소수 비트열을 직접 먹이므로 실행·스레드와 무관하게 결정적이다.
+pub fn mesh_content_hash(mesh: &TriMesh) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut feed = |bytes: &[u8]| {
+        for b in bytes {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    for p in &mesh.positions {
+        for v in p {
+            feed(&v.to_le_bytes());
+        }
+    }
+    for t in &mesh.triangles {
+        for v in t {
+            feed(&v.to_le_bytes());
+        }
+    }
+    h
+}
+
 /// 메쉬별 1~2단계 이산 미분기하(`weld_vertices` + `Nelson Max 법선` + `Meyer Cotangent H/K` + `Modified Frangi Vesselness`) 캐시 조회
 pub(crate) fn get_or_build_ddg_mesh(
     mesh: &TriMesh,
 ) -> std::sync::Arc<crate::rubbing_ddg_pipeline::TopologicalDdgMesh> {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex, OnceLock};
-    type DdgCacheMap =
-        HashMap<(String, usize, usize), Arc<crate::rubbing_ddg_pipeline::TopologicalDdgMesh>>;
+    type DdgCacheMap = HashMap<
+        (String, usize, usize, [u64; 6], u64),
+        Arc<crate::rubbing_ddg_pipeline::TopologicalDdgMesh>,
+    >;
     static DDG_CACHE: OnceLock<Mutex<DdgCacheMap>> = OnceLock::new();
     let cache = DDG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    // B2 고정점: 이름·개수만으로는 동명 이물·편집 후 재사용을 가려내지 못한다.
+    // bbox 비트 + 내용 해시를 키에 넣어 다른 내용물이면 반드시 재계산한다.
+    let bbox_bits = [
+        mesh.bbox.min[0].to_bits(),
+        mesh.bbox.min[1].to_bits(),
+        mesh.bbox.min[2].to_bits(),
+        mesh.bbox.max[0].to_bits(),
+        mesh.bbox.max[1].to_bits(),
+        mesh.bbox.max[2].to_bits(),
+    ];
     let key = (
         mesh.name.clone(),
         mesh.positions.len(),
         mesh.triangles.len(),
+        bbox_bits,
+        mesh_content_hash(mesh),
     );
     if let Ok(guard) = cache.lock() {
         if let Some(found) = guard.get(&key) {
@@ -177,6 +215,22 @@ pub fn unrolled_texture_dims(size_mm: [f64; 2], base_px: u32) -> (u32, u32) {
     }
 }
 
+/// MSII 다중스케일 박스 반경을 렌더 extent(긴 변 px)에 비례해 산출한다 (B-통일 고정점).
+///
+/// 기준 extent 180px에서 기존 고정값 [1, 2, 4, 8]과 동일해진다.
+/// 비율(1:2:4:8)을 유지하므로 가중치(9.5/5.6/3.2, 0.333/0.20/0.22)를 손대지 않는다.
+pub fn msii_radii_for_extent(extent_px: u32) -> [u32; 4] {
+    const BASE: [f64; 4] = [1.0, 2.0, 4.0, 8.0];
+    const REFERENCE_PX: f64 = 180.0;
+    let e = extent_px.max(48) as f64;
+    [
+        (BASE[0] * e / REFERENCE_PX).round().max(1.0) as u32,
+        (BASE[1] * e / REFERENCE_PX).round().max(1.0) as u32,
+        (BASE[2] * e / REFERENCE_PX).round().max(1.0) as u32,
+        (BASE[3] * e / REFERENCE_PX).round().max(1.0) as u32,
+    ]
+}
+
 /// 곡면 전개도에서 봉합선($\theta = \pm\pi$)을 가로지르는 삼각형 판별.
 /// 세 정점의 전개 좌표가 총 폭의 절반 이상 벌어지면 봉합선 스패닝으로 보고 컬링한다.
 pub fn is_seam_spanning_triangle(u: [f64; 3], total_width_mm: f64) -> bool {
@@ -222,11 +276,18 @@ pub fn render_orthographic_rubbing_rgba_with_params(
     let (sin_t, cos_t) = tilt_rad.sin_cos();
     let roll_rad = params.pose_roll_deg.to_radians();
     let (sin_r, cos_r) = roll_rad.sin_cos();
-    let az_rad = params.light_azimuth_deg.to_radians();
-    let el_rad = params.light_elevation_deg.clamp(5.0, 88.0).to_radians();
-    let light_lx = el_rad.cos() * az_rad.cos();
-    let light_lz = el_rad.cos() * (-az_rad.sin());
-    let light_ly = el_rad.sin();
+    // B1 고정점: 표준광원 표준식(월드프레임)을 법선과 같은 방식으로 뷰별 프레임에 매핑한다.
+    // 정면 [nrx,−nry,nrz] · 배면 [−nrx,nry,nrz] · 평면도 [nrx,nrz,nry] 와 동일한 부호 규칙.
+    let wl = crate::view3d_pane::standard_light_direction(
+        f64::from(params.light_azimuth_deg),
+        f64::from(params.light_elevation_deg),
+    );
+    let (wlx, wly, wlz) = match kind {
+        PlateRasterKind::FrontExteriorRubbing => (wl[0], -wl[1], wl[2]),
+        PlateRasterKind::BackInteriorRubbing => (-wl[0], wl[1], wl[2]),
+        PlateRasterKind::BottomPlanRubbing => (wl[0], wl[2], wl[1]),
+    };
+    let (light_lx, light_ly, light_lz) = (wlx as f32, wly as f32, wlz as f32);
     let light_int = params.light_intensity.clamp(0.4, 1.8);
 
     // 1. Rayon 병렬 정점 직교 투영 좌표 (u, v, depth) 및 Nelson Max 가중 정점 법선 회전 계산
@@ -483,10 +544,12 @@ pub fn render_orthographic_rubbing_rgba_with_params(
 
                 // (c) Mara et al. (2010) 다중 스케일 구면 적분 불변량(MSII) & 곡면 기울기 제거 DoG
                 let z_c = zbuf[idx];
-                let z_r1 = box_mean_z_fast(x, y, 1);
-                let z_r2 = box_mean_z_fast(x, y, 2);
-                let z_r4 = box_mean_z_fast(x, y, 4);
-                let z_r8 = box_mean_z_fast(x, y, 8);
+                // B-통일 고정점: 박스 반경을 렌더 크기에 비례시킨다(기준 180px → [1,2,4,8]).
+                let msii_r = msii_radii_for_extent(w.max(h) as u32);
+                let z_r1 = box_mean_z_fast(x, y, msii_r[0] as usize);
+                let z_r2 = box_mean_z_fast(x, y, msii_r[1] as usize);
+                let z_r4 = box_mean_z_fast(x, y, msii_r[2] as usize);
+                let z_r8 = box_mean_z_fast(x, y, msii_r[3] as usize);
                 let curv_cancel_1_2 = ((z_c - z_r1) - 0.333_333 * (z_c - z_r2)) * 9.5;
                 let curv_cancel_2_4 = ((z_c - z_r2) - 0.20 * (z_c - z_r4)) * 5.6;
                 let curv_cancel_4_8 = ((z_c - z_r4) - 0.22 * (z_c - z_r8)) * 3.2;

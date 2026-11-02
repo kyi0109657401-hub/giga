@@ -489,3 +489,76 @@ fn test_dark_mode_invalidates_zbuffer_cache_and_darkens_viewport_bg() {
         "다크 래스터에 밤 작업대 배경이 있어야 함: {dark_bg_px}"
     );
 }
+
+#[test]
+fn test_standard_light_direction_matches_legacy_formula_and_rubbing_frames() {
+    // B1 고정점: 표준광 315/45가 뷰 파이프라인 양쪽에서 같은 방향이어야 한다.
+    let wl = standard_light_direction(315.0, 45.0);
+    let az = 315.0f64.to_radians();
+    let el = 45.0f64.to_radians();
+    assert!((wl[0] - el.cos() * az.sin()).abs() < 1e-12);
+    assert!((wl[1] + el.cos() * az.cos()).abs() < 1e-12);
+    assert!((wl[2] - el.sin()).abs() < 1e-12);
+    let len = (wl[0] * wl[0] + wl[1] * wl[1] + wl[2] * wl[2]).sqrt();
+    assert!((len - 1.0).abs() < 1e-12, "단위벡터여야 함");
+    // 뷰별 프레임 매핑(탁본 법선과 동일 규칙)은 내적을 보존해야 한다.
+    for n in [[0.3, 0.5, 0.8], [-0.2, 0.9, 0.1], [0.0, 0.0, 1.0]] {
+        let base = n[0] * wl[0] + n[1] * wl[1] + n[2] * wl[2];
+        let front = n[0] * wl[0] + (-n[1]) * (-wl[1]) + n[2] * wl[2];
+        let back = (-n[0]) * (-wl[0]) + n[1] * wl[1] + n[2] * wl[2];
+        let plan = n[0] * wl[0] + n[2] * wl[2] + n[1] * wl[1];
+        assert!((base - front).abs() < 1e-12, "정면 매핑 내적 보존 실패");
+        assert!((base - back).abs() < 1e-12, "배면 매핑 내적 보존 실패");
+        assert!((base - plan).abs() < 1e-12, "평면도 매핑 내적 보존 실패");
+    }
+}
+
+#[test]
+fn test_hd_render_dimensions_scale_with_pixels_per_point() {
+    // B5 고정점: HiDPI에서 물리 픽셀 기준으로 타겟이 커져야 흐림이 없다.
+    let (w1, h1) = compute_isotropic_render_dimensions_hd(420.0, 680.0, false, 1.0);
+    let (w0, h0) = compute_isotropic_render_dimensions(420.0, 680.0, false);
+    assert_eq!((w1, h1), (w0, h0), "dpr=1.0은 기존과 동일해야 함");
+    let (w2, h2) = compute_isotropic_render_dimensions_hd(420.0, 680.0, false, 2.0);
+    assert_eq!((w2, h2), (w0 * 2, h0 * 2), "dpr=2.0은 2배여야 함");
+    // 종횡비는 dpr과 무관하게 보존되어야 한다.
+    let target = 420.0 / 680.0;
+    assert!(((w2 as f64) / (h2 as f64) - target).abs() < 1e-9);
+}
+
+fn section_drawn_half_width(mesh: &TriMesh, tilt_deg: f64, psi_deg: f64) -> f64 {
+    let mut state = View3DPaneState::default();
+    state.tilt_deg = tilt_deg;
+    state.active_section_angle_deg = psi_deg;
+    let vsec = slice_transformed_mesh_world_locked(mesh, &state, true);
+    vsec.polylines_2d
+        .iter()
+        .flatten()
+        .map(|p| p[0].abs())
+        .fold(0.0f64, f64::max)
+}
+
+#[test]
+fn test_section_width_stays_equal_to_report_across_poses() {
+    // 추가분(치수 단일원천): 뒤집기 후 단면 폭이 실측과 어긋나면 그리기 버그다.
+    // 원형 대칭 유물은 뒤집기(180°)·방위각 회전에서 단면 반폭이 일정해야 한다.
+    // (기울이기 25~90°는 절단면이 비스듬해져 기하학적으로 좁아지므로 본 단언에서 제외 —
+    //  치수 표기는 리포트값 단일원천으로 고정한다.)
+    let mesh = make_test_bowl_mesh();
+    let w0 = section_drawn_half_width(&mesh, 0.0, 0.0);
+    assert!(w0 > 1.0, "기준 단면 반폭이 비정상: {w0}");
+    for tilt in [180.0, -180.0, 360.0] {
+        let w = section_drawn_half_width(&mesh, tilt, 0.0);
+        assert!(
+            (w - w0).abs() < 1.0,
+            "tilt={tilt}에서 단면 반폭이 어긋남: {w} vs {w0}"
+        );
+    }
+    for psi in [45.0, 90.0, 135.0, 180.0, 270.0] {
+        let w = section_drawn_half_width(&mesh, 0.0, psi);
+        assert!(
+            (w - w0).abs() < 1.0,
+            "psi={psi}에서 단면 반폭이 어긋남: {w} vs {w0}"
+        );
+    }
+}

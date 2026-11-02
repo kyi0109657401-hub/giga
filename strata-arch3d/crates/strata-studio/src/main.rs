@@ -343,6 +343,22 @@ pub fn build_darch_project(input: &ProjectSaveInput) -> DarchProject {
     .sanitize_clamped()
 }
 
+/// 상단바 간략 치수 문구 — 측정 리포트값만 쓴다 (단일 원천 원칙).
+/// 도판 구경선·치수선 라벨과 동일한 값을 표기해야 한다.
+pub fn format_compact_metric(m: &ArtifactMeasurementReport) -> String {
+    if let Some(ref fit) = m.sherd_circle_fit {
+        format!(
+            "복원구경 Φ{:.1}mm · 잔존고 {:.1}mm · 두께 {:.1}mm",
+            fit.diameter_mm, m.height_or_length_mm, m.mean_wall_thickness_mm,
+        )
+    } else {
+        format!(
+            "기고 {:.1}mm · 구경 Φ{:.1}mm · 두께 {:.1}mm",
+            m.height_or_length_mm, m.rim_or_outer_diameter_mm, m.mean_wall_thickness_mm
+        )
+    }
+}
+
 impl StrataStudioApp {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
@@ -431,7 +447,11 @@ impl StrataStudioApp {
                 s.rubbing_params.unroll_mode = initial_unroll;
                 s
             },
-            rubbing_params: RubbingRenderParams::default(),
+            rubbing_params: RubbingRenderParams {
+                // B-통일 고정점: 내보내기·저장 경로 농도도 표준 78%로 맞춘다.
+                ink_density_pct: crate::sheet_pane::RUBBING_STANDARD_INK_PCT,
+                ..Default::default()
+            },
             flip_exterior_right: false,
             sheet_full_tab_mode: false,
             dark_mode: false,
@@ -1223,23 +1243,7 @@ impl eframe::App for StrataStudioApp {
                             ui.separator();
                         }
                         if let Some(slot) = self.slots.get(self.selected_slot_idx) {
-                            let m = &slot.measurements;
-                            let compact_metric = if let Some(ref fit) = m.sherd_circle_fit {
-                                format!(
-                                    "복원구경 Φ{:.1}mm · 잔존고 {:.1}mm · 두께 {:.1}mm",
-                                    fit.diameter_mm,
-                                    m.height_or_length_mm,
-                                    m.mean_wall_thickness_mm,
-                                )
-                            } else {
-                                format!(
-                                    "기고 {:.1}mm · 구경 Φ{:.1}mm · 두께 {:.1}mm",
-                                    m.height_or_length_mm,
-                                    m.rim_or_outer_diameter_mm,
-                                    m.mean_wall_thickness_mm
-                                )
-                            };
-                            ui.colored_label(muted, compact_metric);
+                            ui.colored_label(muted, format_compact_metric(&slot.measurements));
                         }
 
                         // 8대 도판 모드 수동 선택 (자동 판정 / ①~⑧)
@@ -1412,6 +1416,8 @@ impl eframe::App for StrataStudioApp {
                         self.view3d_state.custom_section_draw_mode = false;
                     }
                     // Image 2: 수평횡단면 그리기 휠(top_cut_z_mm) 및 5대 휠/뒤집기 조작 시 드래그 중에도 즉시 2D 실측 단면·수평횡단면 도판을 실시간 갱신!
+                    // pose 동기 고정: 드래그 중에도 2D 벡터 도판은 3D를 실시간 추적한다.
+                    // (무거운 탁본 래스터는 sheet_psi 동결로 재계산하지 않으므로 180ms 블로킹 없음)
                     let top_z_changed =
                         (self.view3d_state.top_cut_z_mm - self.last_rebuilt_top_z_mm).abs() > 1e-4;
                     let pose_changed = (self.view3d_state.active_section_angle_deg
@@ -1429,7 +1435,7 @@ impl eframe::App for StrataStudioApp {
                             > 1e-4
                         || self.view3d_state.custom_section_line_mm
                             != self.last_rebuilt_custom_line;
-                    if top_z_changed || (!self.view3d_state.is_interacting && pose_changed) {
+                    if top_z_changed || pose_changed {
                         slot.rebuild_plate(self.flip_exterior_right, &self.view3d_state);
                         self.last_rebuilt_angle_deg = self.view3d_state.active_section_angle_deg;
                         self.last_rebuilt_cut_y_mm = self.view3d_state.cut_y_mm;
@@ -1655,7 +1661,7 @@ mod tests {
             top_cut_z_mm: 27.5,
             flip_exterior_right: true,
             scale_preset: ScalePreset::Half1To2,
-            ink_density_pct: 68.0,
+            ink_density_pct: crate::sheet_pane::RUBBING_STANDARD_INK_PCT,
             rubbing_radius_mm: 1.8,
             handprint_texture: false,
         };
@@ -1669,7 +1675,10 @@ mod tests {
         assert_eq!(project.horizontal_cut_heights_mm, vec![27.5]);
         assert!(project.flip_exterior_right);
         assert_eq!(project.scale_preset, ScalePreset::Half1To2);
-        assert!((project.rubbing_ink_density_pct - 68.0).abs() < 1e-9);
+        assert!(
+            (project.rubbing_ink_density_pct - crate::sheet_pane::RUBBING_STANDARD_INK_PCT).abs()
+                < 1e-9
+        );
         assert!((project.rubbing_radius_mm - 1.8).abs() < 1e-9);
         assert!(!project.rubbing_handprint_texture);
     }
@@ -1773,7 +1782,7 @@ mod tests {
                                 &slot.measurements,
                                 &slot.mesh,
                                 view3d_state.active_section_angle_deg,
-                                80.0,
+                                crate::sheet_pane::RUBBING_STANDARD_INK_PCT,
                                 true,
                                 &mut sheet_state,
                             ));
@@ -1807,6 +1816,43 @@ mod tests {
             sheet_rect.width() > 600.0 && sheet_rect.height() > 400.0,
             "sheet_rect must occupy the 73% right workspace: {:?}",
             sheet_rect
+        );
+    }
+
+    /// 추가분(치수 단일원천): 상단바 문구가 측정 리포트값과 동일해야 한다.
+    #[test]
+    fn test_status_bar_metric_matches_report_values() {
+        let positions = vec![
+            [60.0, 0.0, 0.0],
+            [-60.0, 0.0, 0.0],
+            [60.0, 0.0, 50.0],
+            [-60.0, 0.0, 50.0],
+            [0.0, 60.0, 25.0],
+            [0.0, -60.0, 25.0],
+        ];
+        let triangles = vec![
+            [0, 2, 4],
+            [0, 4, 5],
+            [0, 5, 2],
+            [1, 4, 3],
+            [1, 3, 5],
+            [1, 5, 4],
+        ];
+        let mesh = TriMesh::from_positions_and_triangles("상태바 검증볼", positions, triangles)
+            .expect("valid mesh");
+        let m = compute_artifact_measurements(&mesh, ArtifactCategory::CompleteVessel);
+        let text = format_compact_metric(&m);
+        assert!(
+            text.contains(&format!("Φ{:.1}mm", m.rim_or_outer_diameter_mm)),
+            "상단바 구경이 리포트와 다름: {text}"
+        );
+        assert!(
+            text.contains(&format!("{:.1}mm", m.height_or_length_mm)),
+            "상단바 기고가 리포트와 다름: {text}"
+        );
+        assert!(
+            text.contains(&format!("{:.1}mm", m.mean_wall_thickness_mm)),
+            "상단바 두께가 리포트와 다름: {text}"
         );
     }
 }

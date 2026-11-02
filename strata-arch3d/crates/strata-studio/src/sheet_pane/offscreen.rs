@@ -1,3 +1,4 @@
+use super::config::{RUBBING_STANDARD_INK_PCT, RUBBING_STANDARD_RES_PX};
 use super::rubbing::*;
 use eframe::egui;
 use image::{Rgba, RgbaImage};
@@ -254,7 +255,14 @@ fn render_full_workspace_offscreen_png_inner(
     }
 
     if let Some(first_reg) = plate.raster_regions.first() {
-        let rub_img = render_orthographic_rubbing_rgba(mesh, first_reg.kind, 0.0, 76.0, 180, 180);
+        let rub_img = render_orthographic_rubbing_rgba(
+            mesh,
+            first_reg.kind,
+            0.0,
+            RUBBING_STANDARD_INK_PCT,
+            RUBBING_STANDARD_RES_PX,
+            RUBBING_STANDARD_RES_PX,
+        );
         let rx0 = (ox + first_reg.rect_mm[0].min(first_reg.rect_mm[2]) * p_scale).round() as i32;
         let rx1 = (ox + first_reg.rect_mm[0].max(first_reg.rect_mm[2]) * p_scale).round() as i32;
         let ry0 = (oy - first_reg.rect_mm[1].max(first_reg.rect_mm[3]) * p_scale).round() as i32;

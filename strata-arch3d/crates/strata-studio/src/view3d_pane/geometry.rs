@@ -48,8 +48,7 @@ pub fn transform_local_vertex_full(
     [x3 + offset_x_mm, y3, z3 + z_mid]
 }
 
-/// 법선 벡터에 동일한 3축 회전(`ψ`, `tilt_deg`, `roll_deg + inner_level_deg`)을 적용한다.
-#[inline]
+/// 법선 벡터에 동일한 3축 회전(`ψ`, `tilt_deg`, `roll_deg + inner_level_deg`)을 적용한다.#[inline]
 #[allow(clippy::too_many_arguments)]
 pub fn transform_local_normal_full(
     n: [f64; 3],
@@ -72,6 +71,20 @@ pub fn transform_local_normal_full(
     let y3 = y2;
     let z3 = x2 * sin_r + z2 * cos_r;
     [x3, y3, z3]
+}
+
+/// 표준광원 방향 표준식 (B1 고정점).
+///
+/// 방위각(`az_deg`, `315` = 좌상단 45° 표준광) · 고도각(`el_deg`, `45`)을
+/// 월드프레임 단위벡터로 바꾼다. 3D 뷰 래스터와 2D 탁본이 같은 수치를
+/// 같은 방향으로 해석하도록 **단일 출처**로 둔다 (고도 5°..88° 클램프 포함).
+/// 탁본 쪽은 법선과 같은 방식으로 뷰별 프레임에 매핑해서 내적한다.
+pub fn standard_light_direction(az_deg: f64, el_deg: f64) -> [f64; 3] {
+    let az_rad = az_deg.to_radians();
+    let el_rad = el_deg.clamp(5.0, 88.0).to_radians();
+    let (sin_az, cos_az) = az_rad.sin_cos();
+    let (sin_el, cos_el) = el_rad.sin_cos();
+    [cos_el * sin_az, -cos_el * cos_az, sin_el]
 }
 
 /// 우측 2D 도판의 수직 종단면(`vertical_section`) 및 수평 횡단면(`horizontal_section`)을 추출할 때

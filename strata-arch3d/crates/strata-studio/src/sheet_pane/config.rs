@@ -48,6 +48,12 @@ pub enum RubbingFineWheelKind {
     PaperContactThreshold,
 }
 
+/// 탁본 표준 농도·해상도 (B-통일 고정점).
+/// 전 파이프라인(렌더·검증 투어·테스트)은 하드코딩 대신 이 상수를 쓴다.
+/// 표준 농도 78% · 표준 해상도 180px.
+pub const RUBBING_STANDARD_INK_PCT: f64 = 78.0;
+pub const RUBBING_STANDARD_RES_PX: u32 = 180;
+
 /// 학술 디지털 탁본 파라미터 (`탁본 이미지 바로 밑 4종 미세조정 휠` 및 `부분 정밀 탁본 창` 공용).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AcademicRubbingParams {
@@ -78,7 +84,7 @@ pub struct AcademicRubbingParams {
 impl Default for AcademicRubbingParams {
     fn default() -> Self {
         Self {
-            ink_density_pct: 78.0,
+            ink_density_pct: RUBBING_STANDARD_INK_PCT,
             msii_detail_boost: 1.45,
             sigmoid_contrast: 8.2,
             contact_threshold: -0.12,

@@ -1074,17 +1074,14 @@ fn compose_archaeological_plate_inner(
         });
     }
 
-    // 2. 구경선 / 저경선 (수평 브리지 연결선 — 180° 뒤집기 상태 자동 반영)
+    // 2. 구경선 / 저경선 (수평 브리지 연결선 — 항상 측정 리포트값 사용: 단일 원천 원칙.
+    //    그려진 폭이 달라도 치수를 바꾸지 않는다. 편차는 그리기 쪽에서 해소한다.)
     let is_estimated_dashed = matches!(
         input.sherd_strategy,
         Some(SherdPlateStrategy::EstimatedDashedReconstruction)
     );
     if m.rim_or_outer_diameter_mm > 0.0 && mode != PlateLayoutMode::BodyOrMicroSherdThreeColumn {
-        let half_top = if measured_top_half_x > 4.0 {
-            measured_top_half_x
-        } else {
-            m.rim_or_outer_diameter_mm * 0.5
-        };
+        let half_top = m.rim_or_outer_diameter_mm * 0.5;
         paths.push(PlatePathElement {
             layer_id: if is_estimated_dashed {
                 String::from("추정복원_파선")
@@ -1105,11 +1102,7 @@ fn compose_archaeological_plate_inner(
     }
 
     if m.base_diameter_or_width_mm > 0.0 && mode != PlateLayoutMode::BodyOrMicroSherdThreeColumn {
-        let half_bot = if measured_bot_half_x > 4.0 {
-            measured_bot_half_x
-        } else {
-            m.base_diameter_or_width_mm * 0.5
-        };
+        let half_bot = m.base_diameter_or_width_mm * 0.5;
         paths.push(PlatePathElement {
             layer_id: String::from("저경_기준선"),
             points_mm: vec![[cx - half_bot, base_y], [cx + half_bot, base_y]],
