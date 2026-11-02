@@ -145,7 +145,7 @@ pub struct PlateLineStyleConfig {
     pub outer_color_rgb: [u8; 3],
     /// 수평 횡단면·중심 기준선 굵기 (`mm`, 기본 `0.25mm`)
     pub aux_width_mm: f32,
-    /// 수평 횡단면·중심 기준선 색상 (`RGB`, 기본 `#B5573A` 테라코타)
+    /// 수평 횡단면·중심 기준선 색상 (`RGB`, 기본 중립 회색 — 내부 적색 제거).
     pub aux_color_rgb: [u8; 3],
     /// 치수 화살표·인출선 굵기 (`mm`, 기본 `0.22mm`)
     pub dim_width_mm: f32,
@@ -163,7 +163,7 @@ impl Default for PlateLineStyleConfig {
             outer_width_mm: 0.50,
             outer_color_rgb: [20, 20, 19],
             aux_width_mm: 0.20,
-            aux_color_rgb: [181, 87, 58],
+            aux_color_rgb: [110, 106, 98],
             dim_width_mm: 0.15,
             dim_color_rgb: [42, 42, 40],
         }
@@ -232,8 +232,8 @@ pub struct PaperSheetGraphSpec {
     pub lines_5mm_y: Vec<f32>,
     pub lines_10mm_x: Vec<f32>,
     pub lines_10mm_y: Vec<f32>,
-    pub lines_50mm_red_x: Vec<f32>,
-    pub lines_50mm_red_y: Vec<f32>,
+    pub lines_50mm_grid_x: Vec<f32>,
+    pub lines_50mm_grid_y: Vec<f32>,
     pub cm_labels_top: Vec<(f32, String)>,
     pub cm_labels_left: Vec<(f32, String)>,
 }
@@ -268,8 +268,8 @@ pub fn compute_paper_sheet_graph_spec(
     let mut lines_5mm_y = Vec::new();
     let mut lines_10mm_x = Vec::new();
     let mut lines_10mm_y = Vec::new();
-    let mut lines_50mm_red_x = Vec::new();
-    let mut lines_50mm_red_y = Vec::new();
+    let mut lines_50mm_grid_x = Vec::new();
+    let mut lines_50mm_grid_y = Vec::new();
     let mut cm_labels_top = Vec::new();
     let mut cm_labels_left = Vec::new();
 
@@ -283,7 +283,7 @@ pub fn compute_paper_sheet_graph_spec(
             continue;
         }
         if mm_x.rem_euclid(50) == 0 {
-            lines_50mm_red_x.push(gx);
+            lines_50mm_grid_x.push(gx);
             lines_10mm_x.push(gx);
             if mm_x >= 0 && (mm_x as f32) <= pw_mm + 0.5 {
                 cm_labels_top.push((gx, format!("{}cm", mm_x / 10)));
@@ -308,7 +308,7 @@ pub fn compute_paper_sheet_graph_spec(
             continue;
         }
         if mm_y.rem_euclid(50) == 0 {
-            lines_50mm_red_y.push(gy);
+            lines_50mm_grid_y.push(gy);
             lines_10mm_y.push(gy);
             if mm_y >= 0 && (mm_y as f32) <= ph_mm + 0.5 {
                 cm_labels_left.push((gy, format!("{}cm", mm_y / 10)));
@@ -335,8 +335,8 @@ pub fn compute_paper_sheet_graph_spec(
         lines_5mm_y,
         lines_10mm_x,
         lines_10mm_y,
-        lines_50mm_red_x,
-        lines_50mm_red_y,
+        lines_50mm_grid_x,
+        lines_50mm_grid_y,
         cm_labels_top,
         cm_labels_left,
     }

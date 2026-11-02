@@ -5,7 +5,7 @@ use strata_export::PlateRasterKind;
 use strata_measure::compute_artifact_measurements;
 
 use super::config::*;
-use super::render::resolve_rim_label_width_mm;
+use super::render::{resolve_rim_label_width_mm, PAPER_BORDER_RED_RGB, SHEET_GRID_5CM_RGB};
 use super::rubbing::*;
 use super::state::*;
 use super::widgets::*;
@@ -496,9 +496,10 @@ fn test_tdd16_roi_1to1_rubbing_with_under_image_wheels_and_tight_dimensions() {
 }
 
 #[test]
-fn test_tdd20_paper_sheet_5cm_red_grid_and_non_overlapping_line_widgets() {
+fn test_tdd20_paper_sheet_5cm_grid_and_non_overlapping_line_widgets() {
     // 1. "방안지 여백은 무한대로 배경을 하고 용지만 붉은선으로 표시하게 하자":
     // 방안선이 용지 경계(paper_bounds_rect) 바깥 여백까지 무한대(sheet_rect 전체)로 확장되고, 용지 경계 사각형이 정확히 산출됨을 검증!
+    // (내부 적색 제거: 5cm 격자선은 중립 회색 — 용지 경계 적색만 유지.)
     let sheet_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 760.0));
     let spec = compute_paper_sheet_graph_spec(
         sheet_rect,
@@ -512,8 +513,8 @@ fn test_tdd20_paper_sheet_5cm_red_grid_and_non_overlapping_line_widgets() {
         "paper bounds must sit inside the viewport as the red-bordered publication sheet"
     );
     assert!(
-        !spec.lines_50mm_red_x.is_empty() && !spec.lines_50mm_red_y.is_empty(),
-        "must generate 5cm (50mm) thin red grid lines"
+        !spec.lines_50mm_grid_x.is_empty() && !spec.lines_50mm_grid_y.is_empty(),
+        "must generate 5cm (50mm) thin neutral grid lines"
     );
     assert!(
         spec.lines_10mm_x
@@ -551,6 +552,49 @@ fn test_tdd20_paper_sheet_5cm_red_grid_and_non_overlapping_line_widgets() {
             }
         }
     }
+}
+
+#[test]
+fn test_aux_line_default_is_neutral_gray_not_terra_red() {
+    // task-14: 보조선(횡단면·중심·십자선) 기본값은 중립 회색이어야 한다.
+    // (용도 기준 식별 — 사용자가 색상 편집기로 바꾸는 것은 허용.)
+    let style = PlateLineStyleConfig::default();
+    let [r, g, b] = style.aux_color_rgb;
+    assert!(
+        (r as i16 - g as i16).abs() < 12 && (g as i16 - b as i16).abs() < 12,
+        "보조선 기본값이 중립 회색이 아님: [{r},{g},{b}]"
+    );
+    assert_ne!(
+        style.aux_color_rgb,
+        [181, 87, 58],
+        "보조선 기본값이 테라코타 적색이면 안 됨"
+    );
+}
+
+#[test]
+fn test_red_rules_keep_section_and_paper_but_not_interior() {
+    // task-14 색상 계약: 단면선 빨강(#FF0000)과 용지 경계 적색은 유지,
+    // 내부(5cm 방안선·보조선 기본값)는 중립 회색이어야 한다.
+    use strata_core::strata_tokens::tokens::PROFILE_RED;
+    assert_eq!(
+        PROFILE_RED.rgb,
+        [255, 0, 0],
+        "단면선 빨강 정본이 바뀌면 안 됨"
+    );
+    assert!(
+        PAPER_BORDER_RED_RGB[0] > PAPER_BORDER_RED_RGB[1] + 100,
+        "용지 경계는 적색을 유지해야 함: {:?}",
+        PAPER_BORDER_RED_RGB
+    );
+    let [r, g, b] = SHEET_GRID_5CM_RGB;
+    assert!(
+        (r as i16 - g as i16).abs() < 12 && (g as i16 - b as i16).abs() < 12,
+        "5cm 방안선이 중립 회색이 아님: [{r},{g},{b}]"
+    );
+    assert!(
+        r < 150,
+        "5cm 방안선에 적색이 남아 있으면 안 됨: [{r},{g},{b}]"
+    );
 }
 
 #[test]

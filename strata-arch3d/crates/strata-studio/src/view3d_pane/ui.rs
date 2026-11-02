@@ -415,7 +415,17 @@ pub fn render_view3d_pane_egui(
             art_center_px.y - r_100_px * 0.85 * psi_rad.sin(),
         );
         tp.line_segment([art_center_px, needle_pt], egui::Stroke::new(1.3_f32, terra));
-        tp.circle_filled(td_center, 3.2, profile_red);
+        // 뷰 중심점 — 중립 회색 (내부 적색 제거, 단면선 빨강은 유지).
+        tp.circle_filled(
+            td_center,
+            3.2,
+            egui::Color32::from_rgba_unmultiplied(
+                super::geometry::VIEWPORT_GRID_GRAY[0],
+                super::geometry::VIEWPORT_GRID_GRAY[1],
+                super::geometry::VIEWPORT_GRID_GRAY[2],
+                255,
+            ),
+        );
 
         // 직상방 뷰 상단 미니 배지
         let td_hdr = egui::Rect::from_min_size(

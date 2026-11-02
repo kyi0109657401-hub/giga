@@ -12,6 +12,12 @@ use strata_core::{ScalePreset, TriMesh};
 use strata_export::{triangulate_polygon_ear_clipping, ComposedPlate2D, PlateRasterKind};
 use strata_measure::ArtifactMeasurementReport;
 
+/// 5cm 방안선 중립 회색 (task-14 내부 적색 제거 — 용지 경계 적색은 유지).
+pub const SHEET_GRID_5CM_RGB: [u8; 3] = [110, 106, 98];
+pub const SHEET_GRID_5CM_ALPHA: u8 = 175;
+/// 출판 용지 경계 적색 (task-14 유지 대상 ②).
+pub const PAPER_BORDER_RED_RGB: [u8; 3] = [218, 34, 34];
+
 /// 치수선 구경값 결정 (단일 원천 원칙).
 ///
 /// 항상 측정 리포트값을 돌려준다. 그려진 폭이 달라도 숫자를 바꾸지 않는다 —
@@ -308,18 +314,23 @@ pub fn render_sheet_pane_egui(
                     egui::Stroke::new(0.95_f32, grid_10),
                 );
             }
-            // 5cm(50mm)마다 얇은 빨간색선!
-            let red_5cm_col = egui::Color32::from_rgba_unmultiplied(218, 46, 36, 175);
-            for &rx in &spec.lines_50mm_red_x {
+            // 5cm(50mm)마다 얇은 중립 회색선 (내부 적색 제거 — 용지 경계 적색은 유지).
+            let grid_5cm_col = egui::Color32::from_rgba_unmultiplied(
+                SHEET_GRID_5CM_RGB[0],
+                SHEET_GRID_5CM_RGB[1],
+                SHEET_GRID_5CM_RGB[2],
+                SHEET_GRID_5CM_ALPHA,
+            );
+            for &rx in &spec.lines_50mm_grid_x {
                 paper_painter.line_segment(
                     [egui::pos2(rx, sheet_rect.top()), egui::pos2(rx, sheet_rect.bottom())],
-                    egui::Stroke::new(1.00_f32, red_5cm_col),
+                    egui::Stroke::new(1.00_f32, grid_5cm_col),
                 );
             }
-            for &ry in &spec.lines_50mm_red_y {
+            for &ry in &spec.lines_50mm_grid_y {
                 paper_painter.line_segment(
                     [egui::pos2(sheet_rect.left(), ry), egui::pos2(sheet_rect.right(), ry)],
-                    egui::Stroke::new(1.00_f32, red_5cm_col),
+                    egui::Stroke::new(1.00_f32, grid_5cm_col),
                 );
             }
 
@@ -331,7 +342,7 @@ pub fn render_sheet_pane_egui(
                         egui::Align2::LEFT_CENTER,
                         lbl,
                         egui::FontId::monospace(8.5),
-                        if is_5cm { red_5cm_col } else { muted },
+                        if is_5cm { grid_5cm_col } else { muted },
                     );
                 }
             }
@@ -343,14 +354,19 @@ pub fn render_sheet_pane_egui(
                         egui::Align2::LEFT_CENTER,
                         lbl,
                         egui::FontId::monospace(8.5),
-                        if is_5cm { red_5cm_col } else { muted },
+                        if is_5cm { grid_5cm_col } else { muted },
                     );
                 }
             }
         }
 
         // "용지만 붉은선으로 표시하게 하자": 출판 용지 경계(p_rect)를 선명한 붉은색 실선 테두리로 표시!
-        let paper_red_border = egui::Color32::from_rgb(218, 34, 34);
+        // task-14 유지 대상 ② (제거 대상이 아님).
+        let paper_red_border = egui::Color32::from_rgb(
+            PAPER_BORDER_RED_RGB[0],
+            PAPER_BORDER_RED_RGB[1],
+            PAPER_BORDER_RED_RGB[2],
+        );
         paper_painter.rect_stroke(
             p_rect,
             1.5,
