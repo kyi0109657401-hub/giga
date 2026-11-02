@@ -204,11 +204,11 @@ pub fn render_view3d_pane_egui(
         let tp = ui.painter_at(top_rect);
         tp.rect_filled(top_rect, 3.0, viewport_bg);
 
-        // HiDPI 대응: 물리 픽셀로 렌더링해 LINEAR 확대 흐림을 없앤다 (B5 고정점).
+        // HiDPI 대응은 ensure_topdown_cached 내부에서 1회만 계산한다 (호출부 선스케일 금지).
         let dpr = ui.ctx().pixels_per_point().clamp(1.0, 4.0);
-        let top_w = ((top_rect.width() * dpr).round() as u32).clamp(160, 1600);
-        let top_h = ((top_rect.height() * dpr).round() as u32).clamp(140, 1600);
-        let _ = state.ensure_topdown_cached(mesh, top_w, top_h);
+        let top_w = top_rect.width().round().max(1.0) as u32;
+        let top_h = top_rect.height().round().max(1.0) as u32;
+        let _ = state.ensure_topdown_cached(mesh, top_w, top_h, dpr);
         if state.cached_topdown_tex.is_none() {
             if let Some(ref td_img) = state.cached_topdown_rgba {
                 let cimg = egui::ColorImage::from_rgba_unmultiplied(
@@ -608,13 +608,17 @@ pub fn render_view3d_pane_egui(
             || inner_dial_resp.dragged();
         state.is_interacting = is_dragging;
 
-        let (render_w, render_h) = compute_isotropic_render_dimensions_hd(
-            rect.width(),
-            rect.height(),
-            is_dragging,
+        let (render_w, render_h) = (
+            rect.width().round().max(1.0) as u32,
+            rect.height().round().max(1.0) as u32,
+        );
+        let _ = state.ensure_zbuffer_cached(
+            mesh,
+            region_labels,
+            render_w,
+            render_h,
             ui.ctx().pixels_per_point(),
         );
-        let _ = state.ensure_zbuffer_cached(mesh, region_labels, render_w, render_h);
 
         if state.cached_zbuffer_tex.is_none() {
             if let Some(ref zbuf_img) = state.cached_zbuffer_rgba {

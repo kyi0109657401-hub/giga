@@ -102,16 +102,9 @@ impl PrecisionWheelKind {
     }
 }
 
-/// 3D 뷰포트의 가로·세로 종횡비(`rect_w / rect_h`)를 드래그 중과 해제 후에 100% 동일하게 보존하는 고해상도 등방성 렌더 크기를 계산한다.
-pub fn compute_isotropic_render_dimensions(
-    rect_w: f32,
-    rect_h: f32,
-    is_dragging: bool,
-) -> (u32, u32) {
-    compute_isotropic_render_dimensions_hd(rect_w, rect_h, is_dragging, 1.0)
-}
-
-/// HiDPI(기기 픽셀 비율) 대응판: 물리 픽셀 기준으로 타겟을 잡아 LINEAR 확대 흐림을 없앤다.
+/// 3D 뷰포트의 가로·세로 종횡비(`rect_w / rect_h`)를 드래그 중과 해제 후에 100% 동일하게 보존하는
+/// 고해상도 등방성 렌더 크기를 계산한다 (`pixels_per_point` 반영, ensure_* 내부 전용).
+/// HiDPI(기기 픽셀 비율) 대응: 물리 픽셀 기준으로 타겟을 잡아 LINEAR 확대 흐림을 없앤다.
 ///
 /// 기존 저해상 타겟을 그대로 올리면 고배율 디스플레이에서 원본 텍스처가 정상인데도
 /// 표시 경로에서 뭉개졌다. `pixels_per_point`를 곱해 1:1 물리 해상도로 렌더링한다.
@@ -346,15 +339,24 @@ impl View3DPaneState {
     }
 
     /// 파라미터가 바뀌었을 때만 정면 입면 Z-버퍼를 재렌더링하고, 변경이 없으면 캐시된 버퍼를 즉시 반환한다 (`0ms`).
+    ///
+    /// `pixels_per_point`를 받아 내부에서 1회만 타겟을 계산한다 (호출부 선스케일 금지 —
+    /// 선스케일분은 이 안에서 재계산되어 무력화되므로 이중 스케일이 된다).
+    /// 캐시키에 최종 dims가 들어가므로 dpr 전환 시 자동 재계산된다.
     pub fn ensure_zbuffer_cached(
         &mut self,
         mesh: &TriMesh,
         region_labels: Option<&[SurfaceRegion]>,
         width: u32,
         height: u32,
+        pixels_per_point: f32,
     ) -> (u32, u32, bool) {
-        let (w, h) =
-            compute_isotropic_render_dimensions(width as f32, height as f32, self.is_interacting);
+        let (w, h) = compute_isotropic_render_dimensions_hd(
+            width as f32,
+            height as f32,
+            self.is_interacting,
+            pixels_per_point,
+        );
         let key = self.build_cache_key(&mesh.name, w, h);
         if self.cached_zbuffer_key.as_ref() == Some(&key) {
             if let Some(ref img) = self.cached_zbuffer_rgba {
@@ -371,14 +373,20 @@ impl View3DPaneState {
     }
 
     /// 파라미터가 바뀌었을 때만 직상방(Top-Down) 동심원 방안지 Z-버퍼를 등방성(`1:1`) 고해상도로 재렌더링하고 캐시한다.
+    /// dpr은 내부에서 1회만 반영한다 (호출부 선스케일 금지).
     pub fn ensure_topdown_cached(
         &mut self,
         mesh: &TriMesh,
         width: u32,
         height: u32,
+        pixels_per_point: f32,
     ) -> (u32, u32, bool) {
-        let (w, h) =
-            compute_isotropic_render_dimensions(width as f32, height as f32, self.is_interacting);
+        let (w, h) = compute_isotropic_render_dimensions_hd(
+            width as f32,
+            height as f32,
+            self.is_interacting,
+            pixels_per_point,
+        );
         let key = self.build_cache_key(&mesh.name, w, h);
         if self.cached_topdown_key.as_ref() == Some(&key) {
             if let Some(ref img) = self.cached_topdown_rgba {

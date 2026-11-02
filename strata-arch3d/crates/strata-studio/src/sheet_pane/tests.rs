@@ -884,10 +884,12 @@ fn test_plate_gauge_lines_use_report_values_across_flips() {
     poses.push((0.0, 90.0, 0.0));
     poses.push((0.0, 0.0, 90.0));
     for (tilt, yaw, roll) in poses {
-        let mut v3d = crate::view3d_pane::View3DPaneState::default();
-        v3d.tilt_deg = tilt;
-        v3d.active_section_angle_deg = yaw;
-        v3d.roll_deg = roll;
+        let v3d = crate::view3d_pane::View3DPaneState {
+            tilt_deg: tilt,
+            active_section_angle_deg: yaw,
+            roll_deg: roll,
+            ..Default::default()
+        };
         let vsec = crate::view3d_pane::slice_transformed_mesh_world_locked(&mesh, &v3d, true);
         let plate = compose_archaeological_plate(&PlateComposeInput {
             title: "뒤집기 정합",

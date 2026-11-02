@@ -158,7 +158,7 @@ fn test_tdd1_view3d_dirty_cache_skips_redundant_rerender_and_supports_hd_resolut
     let mesh = make_test_bowl_mesh();
     let mut state = View3DPaneState::default();
 
-    let (w1, h1, recomputed1) = state.ensure_zbuffer_cached(&mesh, None, 560, 560);
+    let (w1, h1, recomputed1) = state.ensure_zbuffer_cached(&mesh, None, 560, 560, 1.0);
     assert!(recomputed1, "first frame must recompute Z-buffer");
     assert_eq!(
         (w1, h1),
@@ -166,7 +166,7 @@ fn test_tdd1_view3d_dirty_cache_skips_redundant_rerender_and_supports_hd_resolut
         "must support HD 560x560 resolution without 360px clamp"
     );
 
-    let (w2, h2, recomputed2) = state.ensure_zbuffer_cached(&mesh, None, 560, 560);
+    let (w2, h2, recomputed2) = state.ensure_zbuffer_cached(&mesh, None, 560, 560, 1.0);
     assert!(
         !recomputed2,
         "identical state must hit dirty cache with 0 recomputation"
@@ -174,7 +174,7 @@ fn test_tdd1_view3d_dirty_cache_skips_redundant_rerender_and_supports_hd_resolut
     assert_eq!((w2, h2), (560, 560));
 
     state.active_section_angle_deg = 45.0;
-    let (_, _, recomputed3) = state.ensure_zbuffer_cached(&mesh, None, 560, 560);
+    let (_, _, recomputed3) = state.ensure_zbuffer_cached(&mesh, None, 560, 560, 1.0);
     assert!(
         recomputed3,
         "changed rotation angle must trigger Z-buffer recomputation"
@@ -215,8 +215,8 @@ fn test_tdd4_hand_dial_spherical_rotation_updates_pitch_yaw_roll() {
 
 #[test]
 fn test_tdd8_isotropic_projection_never_stretches_vertically_on_drag_release() {
-    let (dw, dh) = compute_isotropic_render_dimensions(420.0, 680.0, true);
-    let (rw, rh) = compute_isotropic_render_dimensions(420.0, 680.0, false);
+    let (dw, dh) = compute_isotropic_render_dimensions_hd(420.0, 680.0, true, 1.0);
+    let (rw, rh) = compute_isotropic_render_dimensions_hd(420.0, 680.0, false, 1.0);
     let target_aspect = 420.0 / 680.0;
     let drag_aspect = (dw as f64) / (dh as f64);
     let release_aspect = (rw as f64) / (rh as f64);
@@ -468,12 +468,12 @@ fn test_dark_mode_invalidates_zbuffer_cache_and_darkens_viewport_bg() {
     // Gemini 리뷰 a6ecaaa ③: 다크 전환 시 래스터 바탕이 바뀌어야 하고 캐시가 무효화되어야 한다.
     let mesh = make_test_bowl_mesh();
     let mut state = View3DPaneState::default();
-    let (_, _, recomputed1) = state.ensure_zbuffer_cached(&mesh, None, 120, 120);
+    let (_, _, recomputed1) = state.ensure_zbuffer_cached(&mesh, None, 120, 120, 1.0);
     assert!(recomputed1, "첫 렌더링은 재계산되어야 함");
-    let (_, _, recomputed2) = state.ensure_zbuffer_cached(&mesh, None, 120, 120);
+    let (_, _, recomputed2) = state.ensure_zbuffer_cached(&mesh, None, 120, 120, 1.0);
     assert!(!recomputed2, "동일 상태는 캐시 적중해야 함");
     state.dark_mode = true;
-    let (_, _, recomputed3) = state.ensure_zbuffer_cached(&mesh, None, 120, 120);
+    let (_, _, recomputed3) = state.ensure_zbuffer_cached(&mesh, None, 120, 120, 1.0);
     assert!(recomputed3, "다크 전환 시 캐시가 무효화되어야 함");
     let img = state.cached_zbuffer_rgba.as_ref().expect("cached image");
     let dark_bg_px = img
@@ -515,21 +515,31 @@ fn test_standard_light_direction_matches_legacy_formula_and_rubbing_frames() {
 
 #[test]
 fn test_hd_render_dimensions_scale_with_pixels_per_point() {
-    // B5 고정점: HiDPI에서 물리 픽셀 기준으로 타겟이 커져야 흐림이 없다.
-    let (w1, h1) = compute_isotropic_render_dimensions_hd(420.0, 680.0, false, 1.0);
-    let (w0, h0) = compute_isotropic_render_dimensions(420.0, 680.0, false);
-    assert_eq!((w1, h1), (w0, h0), "dpr=1.0은 기존과 동일해야 함");
-    let (w2, h2) = compute_isotropic_render_dimensions_hd(420.0, 680.0, false, 2.0);
-    assert_eq!((w2, h2), (w0 * 2, h0 * 2), "dpr=2.0은 2배여야 함");
+    // B5 고정점: HiDPI에서 ensure 경로가 물리 픽셀 기준으로 타겟을 키워야 흐림이 없다.
+    // (헬퍼 직접 호출이 아닌 실제 렌더 경로로 검증한다.)
+    let mesh = make_test_bowl_mesh();
+    let mut state = View3DPaneState::default();
+    let (w1, h1, recomputed1) = state.ensure_zbuffer_cached(&mesh, None, 420, 680, 1.0);
+    assert!(recomputed1, "첫 렌더링은 재계산되어야 함");
+    assert_eq!((w1, h1), (420, 680));
+    // dpr 전환 → dims가 바뀌므로 캐시 무효화 + 2배 타겟.
+    let (w2, h2, recomputed2) = state.ensure_zbuffer_cached(&mesh, None, 420, 680, 2.0);
+    assert!(recomputed2, "dpr 변경 시 재계산되어야 함");
+    assert_eq!((w2, h2), (w1 * 2, h1 * 2), "dpr=2.0은 2배여야 함");
     // 종횡비는 dpr과 무관하게 보존되어야 한다.
     let target = 420.0 / 680.0;
     assert!(((w2 as f64) / (h2 as f64) - target).abs() < 1e-9);
+    // 동일 dpr 반복 호출은 캐시 적중.
+    let (_, _, recomputed3) = state.ensure_zbuffer_cached(&mesh, None, 420, 680, 2.0);
+    assert!(!recomputed3, "동일 dpr는 캐시 적중해야 함");
 }
 
 fn section_drawn_half_width(mesh: &TriMesh, tilt_deg: f64, psi_deg: f64) -> f64 {
-    let mut state = View3DPaneState::default();
-    state.tilt_deg = tilt_deg;
-    state.active_section_angle_deg = psi_deg;
+    let state = View3DPaneState {
+        tilt_deg,
+        active_section_angle_deg: psi_deg,
+        ..Default::default()
+    };
     let vsec = slice_transformed_mesh_world_locked(mesh, &state, true);
     vsec.polylines_2d
         .iter()
