@@ -17,6 +17,17 @@ pub fn export_plate_to_dxf_r12(plate: &ComposedPlate2D) -> String {
         } else {
             "SECTION_SOLID"
         };
+        // 채움 지정 사각형(예: 단일 흑색 축척 바디)은 R12 SOLID 면으로 내보낸다.
+        // 외곽 LINE 4개만 있으면 CAD에서 빈 사각형으로 보이기 때문이다.
+        if elem.closed && elem.fill_hex.is_some() && elem.points_mm.len() == 4 {
+            let p = &elem.points_mm;
+            let _ = write!(
+                dxf,
+                "0\nSOLID\n8\n{layer}\n10\n{:.4}\n20\n{:.4}\n30\n0.0\n11\n{:.4}\n21\n{:.4}\n31\n0.0\n12\n{:.4}\n22\n{:.4}\n32\n0.0\n13\n{:.4}\n23\n{:.4}\n33\n0.0\n",
+                p[0][0], p[0][1], p[1][0], p[1][1], p[2][0], p[2][1], p[3][0], p[3][1]
+            );
+            continue;
+        }
         for seg in elem.points_mm.windows(2) {
             let p0 = seg[0];
             let p1 = seg[1];

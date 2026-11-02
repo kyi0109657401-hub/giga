@@ -778,7 +778,12 @@ pub fn render_sheet_pane_egui(
                 continue;
             }
             let view_center_mm = layer_centers_mm[view_idx];
-            let is_scale_bar = elem.layer_id == "치수_축척막대" || elem.layer_id == "축척자_5cm";
+            // 치수_축척 3종(기선·바디·눈금)은 한 조립품이므로 레이어 이동·회전에서 동일하게 취급한다.
+            // (기선만 고정하고 바디·눈금을 따로 움직이면 축척자가 깨진다 — Gemini 27094f5 §2)
+            let is_scale_bar = elem.layer_id == "치수_축척막대"
+                || elem.layer_id == "치수_축척바디"
+                || elem.layer_id == "치수_축척눈금"
+                || elem.layer_id == "축척자_5cm";
             let transformed_points_mm: Vec<[f64; 2]> = if !is_scale_bar
                 && (vtf.rot_90_steps != 0
                     || vtf.flip_forward_steps != 0
@@ -849,8 +854,8 @@ pub fn render_sheet_pane_egui(
                 }
             }
 
-            // 단일 흑색 바디 축척자 (`치수_축척막대`) — E:\ 3차 실측 확정:
-            // 바디 [bar_len × 1.17mm] 단일 흑색 rect, 기선(베이스라인)은 바디 상단 +1.03mm.
+            // 단일 흑색 바디 축척자 (`치수_축척막대` 기선 앵커) — E:\ 3차 실측 확정:
+            // 바디 [bar_len × 1.17mm] 단일 흑색 rect + 기선(베이스라인) 작화.
             // composer의 기선을 앵커로 쓴다.
             if (elem.layer_id == "치수_축척막대" || elem.layer_id == "축척자_5cm")
                 && transformed_points_mm.len() >= 2
@@ -875,6 +880,16 @@ pub fn render_sheet_pane_egui(
                     egui::vec2(bar_w, bar_h),
                 );
                 paper_painter.rect_filled(body_rect, 0.0, dim_col);
+                // 기선(베이스라인) 작화 — 특수분기 `continue` 로 건너뛰기 전에 그린다.
+                paper_painter.line_segment(
+                    [egui::pos2(x0.min(x1), y_bar), egui::pos2(x0.max(x1), y_bar)],
+                    egui::Stroke::new((0.20 * scale).clamp(0.8, 2.0), dim_col),
+                );
+                continue;
+            }
+
+            // 치수_축척바디는 위 특수분기에서 완전 렌더(채움+기선)하므로 일반 외곽선을 그리지 않는다 (중첩 방지).
+            if elem.layer_id == "치수_축척바디" {
                 continue;
             }
 
@@ -954,12 +969,9 @@ pub fn render_sheet_pane_egui(
                 "#5E5D59" => muted,
                 _ => dim_col,
             };
-            // 축척 라벨은 현재 선택된 축척의 실무 표기(「10cm (1/2)」)로 다시 쓴다.
-            let shown_text = if c.layer_id == "치수_축척라벨" {
-                state.active_scale_preset.standard_scale_bar_mm().1.to_string()
-            } else {
-                c.text.clone()
-            };
+            // 축척 라벨 3단("0" · 절반값 · "전체값(축척)")은 composer가 각인한 그대로 쓴다.
+            // (전역 치환은 3단을 모두 같은 문구로 덮어써서 금지.)
+            let shown_text = c.text.clone();
             paper_painter.text(
                 pos,
                 egui::Align2::LEFT_TOP,

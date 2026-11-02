@@ -62,6 +62,18 @@ pub fn compute_tiled_print_plan(
     }
 }
 
+/// `#RRGGBB` 16진 색상을 PDF `rg` 연산자용 0.0~1.0 삼중항으로 바꾼다.
+fn hex_to_rgb01(hex: &str) -> Option<[f64; 3]> {
+    let h = hex.strip_prefix('#')?;
+    if h.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&h[0..2], 16).ok()? as f64 / 255.0;
+    let g = u8::from_str_radix(&h[2..4], 16).ok()? as f64 / 255.0;
+    let b = u8::from_str_radix(&h[4..6], 16).ok()? as f64 / 255.0;
+    Some([r, g, b])
+}
+
 /// 단일 시트 또는 대형 유물 다중 시트 분할 인쇄용 표준 벡터 PDF-1.4 바이트열을 생성한다.
 /// - 각 페이지에 `5cm` 물리 자 대조용 검증 막대(`Verification Ruler`), 재단선(`Crop Dashed Line`), 조립 마크(`⊕`), 페이지 번호(`1/N`)를 삽입한다.
 pub fn render_plate_to_pdf_bytes(
@@ -117,7 +129,22 @@ pub fn render_plate_to_pdf_bytes(
                 let _ = writeln!(content_stream, "{x_pt:.2} {y_pt:.2} l");
             }
         }
+        // 채움 지정 닫힌 경로(예: 단일 흑색 축척 바디)는 면으로 채운다.
+        // 외곽선 없음(stroke 0)이면 채우기만(`f`), 있으면 채우기+외곽선(`b`)이다.
         if elem.closed {
+            if let Some(fill_hex) = elem.fill_hex.as_deref().and_then(hex_to_rgb01) {
+                let _ = writeln!(
+                    content_stream,
+                    "{:.3} {:.3} {:.3} rg",
+                    fill_hex[0], fill_hex[1], fill_hex[2]
+                );
+                if elem.stroke_width_mm <= 0.0 {
+                    let _ = writeln!(content_stream, "f");
+                } else {
+                    let _ = writeln!(content_stream, "b");
+                }
+                continue;
+            }
             let _ = writeln!(content_stream, "s");
         } else {
             let _ = writeln!(content_stream, "S");

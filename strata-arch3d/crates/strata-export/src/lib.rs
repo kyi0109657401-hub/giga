@@ -908,4 +908,39 @@ mod tests {
             "비금속 도판에 목질흔 결선이 있음"
         );
     }
+
+    #[test]
+    fn test_solid_scale_bar_exports_without_forced_outline() {
+        // Gemini 27094f5 ④: 외곽선 없는 단일 흑색 바디가 각 파생 포맷에 면으로 나가야 한다.
+        let plate = compose_sample_vessel_plate();
+
+        // SVG: 바디 path는 stroke="none", fill="#141413" (0.50px 강제 금지).
+        let svg = render_plate_to_illustrator_svg(&plate);
+        let g_open = "<g id=\"치수_축척바디\">";
+        let g_at = svg.find(g_open).expect("축척바디 레이어 없음");
+        let g_close = svg[g_at..].find("</g>").expect("레이어 닫힘 없음") + g_at;
+        let body_group = &svg[g_at..g_close];
+        assert!(
+            body_group.contains("fill=\"#141413\""),
+            "SVG 바디 채움이 흑색이 아님"
+        );
+        assert!(
+            body_group.contains("stroke=\"none\""),
+            "SVG 바디에 외곽선이 강제됨: {body_group}"
+        );
+
+        // DXF: 바디는 R12 SOLID 면으로, 외곽 LINE 4개가 아니다.
+        let dxf = export_plate_to_dxf_r12(&plate);
+        assert!(dxf.contains("\nSOLID\n"), "DXF에 SOLID 면이 없음");
+        assert!(!dxf.contains("\nHATCH\n"), "DXF R12에 HATCH를 쓰면 안 됨");
+
+        // PDF: 바디는 채우기 연산자(`f`)로, 빈 `s` 사각형이 아니다.
+        let pdf_bytes = render_plate_to_pdf_bytes(&plate, PaperSheetSize::A4Portrait, 10.0);
+        let pdf = String::from_utf8_lossy(&pdf_bytes);
+        assert!(pdf.contains(" rg\n"), "PDF에 채움색 지정이 없음");
+        assert!(
+            pdf.lines().any(|l| l.trim_end() == "f"),
+            "PDF에 채우기 연산자가 없음"
+        );
+    }
 }

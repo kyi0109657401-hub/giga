@@ -226,6 +226,13 @@ pub fn render_plate_to_illustrator_svg_with_options(
                 d.push_str(" Z");
             }
             let fill_attr = elem.fill_hex.as_deref().unwrap_or("none");
+            // 외곽선 없음 (`stroke_width_mm <= 0`, 예: 단일 흑색 축척 바디)은
+            // `stroke="none"`으로 직렬화한다 — 최소폭 강제 시 0.10mm 외곽선이 생긴다.
+            let stroke_hex = if elem.stroke_width_mm <= 0.0 {
+                "none"
+            } else {
+                elem.stroke_hex.as_str()
+            };
             let stroke_w_px = (elem.stroke_width_mm * PX_PER_MM_1TO1).max(0.5);
             let dash_attr = if let Some((on_mm, off_mm)) = elem.dash_pattern_mm {
                 format!(
@@ -238,8 +245,7 @@ pub fn render_plate_to_illustrator_svg_with_options(
             };
             let _ = writeln!(
                 svg,
-                r#"    <path d="{d}" fill="{fill_attr}" stroke="{}" stroke-width="{stroke_w_px:.2}" stroke-linecap="round" stroke-linejoin="round"{dash_attr} />"#,
-                elem.stroke_hex
+                r#"    <path d="{d}" fill="{fill_attr}" stroke="{stroke_hex}" stroke-width="{stroke_w_px:.2}" stroke-linecap="round" stroke-linejoin="round"{dash_attr} />"#,
             );
         }
         let _ = writeln!(svg, r#"  </g>"#);
