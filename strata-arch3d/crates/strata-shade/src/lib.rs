@@ -91,4 +91,48 @@ mod tests {
         assert!((unrolled.mean_radius_mm - 30.0).abs() < 1e-6);
         assert_eq!(unrolled.points.len(), 4);
     }
+
+    #[test]
+    fn test_orthographic_rubbing_uses_barycentric_and_zbuffer() {
+        // ④: bbox 통칠 대신 barycentric 보간 + Z버퍼.
+        // 단일 직각삼각형의 bbox 귀퉁이는 삼각형 밖이므로 바탕색 그대로여야 한다
+        // (통칠이면 먹색으로 칠해진다).
+        let positions = vec![[0.0, 0.0, 0.0], [40.0, 0.0, 0.0], [0.0, 40.0, 5.0]];
+        let triangles = vec![[0, 1, 2]];
+        let mesh =
+            TriMesh::from_positions_and_triangles("single_tri", positions, triangles).expect("ok");
+        let img = render_orthographic_rubbing_image(
+            &mesh,
+            None,
+            RubbingRenderParams::default(),
+            200,
+            200,
+        );
+        // 렌더 매핑과 동일한 식으로 화면 좌표를 찾는다 (x폭 40, z폭 5 → scale 4.6).
+        let (w, h) = (200.0, 200.0);
+        let scale = ((w - 16.0) / 40.0_f64).min((h - 16.0) / 5.0);
+        let (cx, cy, mesh_cx, mesh_cz) = (w * 0.5, h * 0.5, 20.0, 2.5);
+        let to_px = |wx: f64, wz: f64| {
+            (
+                (cx + (wx - mesh_cx) * scale).floor() as u32,
+                (cy - (wz - mesh_cz) * scale).floor() as u32,
+            )
+        };
+        // (40, 2.5) → 화면 (192, 100): bbox 안·삼각형 밖.
+        let (ox, oy) = to_px(40.0, 2.5);
+        let corner = img.get_pixel(ox.min(199), oy.min(199));
+        assert_eq!(
+            corner.0,
+            [250, 249, 245, 0],
+            "bbox 귀퉁이가 통칠되면 안 됨: {corner:?} at ({ox},{oy})"
+        );
+        // (10, 1) → 화면 (54, 106): 삼각형 내부 — 먹이 있어야 한다.
+        let (ix, iy) = to_px(10.0, 1.0);
+        let inside = img.get_pixel(ix.min(199), iy.min(199));
+        assert_ne!(
+            inside.0,
+            [250, 249, 245, 0],
+            "삼각형 내부는 칠해져야 함: {inside:?} at ({ix},{iy})"
+        );
+    }
 }

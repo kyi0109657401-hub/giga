@@ -139,6 +139,9 @@ pub fn render_orthographic_rubbing_image(
     let mesh_cx = (mesh.bbox.min[0] + mesh.bbox.max[0]) * 0.5;
     let mesh_cz = (mesh.bbox.min[2] + mesh.bbox.max[2]) * 0.5;
 
+    // ④: 깊이 버퍼 (정면 +y 기준, 가까운 면이 먼 면을 덮는다).
+    let mut zbuf = vec![f64::NEG_INFINITY; (w as usize) * (h as usize)];
+
     for tri in &mesh.triangles {
         let i0 = tri[0] as usize;
         let i1 = tri[1] as usize;
@@ -146,10 +149,9 @@ pub fn render_orthographic_rubbing_image(
         let p0 = mesh.positions[i0];
         let p1 = mesh.positions[i1];
         let p2 = mesh.positions[i2];
-        let ink = (ink_weights[i0] + ink_weights[i1] + ink_weights[i2]) / 3.0;
-        // 먹색(#141413 = 20) ~ 한지 백색(248)
-        let lum = (248.0 - ink * 224.0).round().clamp(18.0, 248.0) as u8;
-        let px_color = Rgba([lum, lum, lum.saturating_sub(2), 255]);
+        let w0_ink = ink_weights[i0];
+        let w1_ink = ink_weights[i1];
+        let w2_ink = ink_weights[i2];
 
         let sx0 = cx + (p0[0] - mesh_cx) * scale;
         let sy0 = cy - (p0[2] - mesh_cz) * scale;
@@ -158,6 +160,14 @@ pub fn render_orthographic_rubbing_image(
         let sx2 = cx + (p2[0] - mesh_cx) * scale;
         let sy2 = cy - (p2[2] - mesh_cz) * scale;
 
+        // ④: bbox 통칠 대신 barycentric 보간 + Z버퍼.
+        // 깊이는 정면(+y) 기준 y 좌표이며, 가까운 면이 먼 면을 덮는다.
+        let denom = (sy1 - sy2) * (sx0 - sx2) + (sx2 - sx1) * (sy0 - sy2);
+        if denom.abs() < 1e-9 {
+            continue;
+        }
+        let inv = 1.0 / denom;
+
         let min_x = sx0.min(sx1).min(sx2).floor().max(0.0) as u32;
         let max_x = sx0.max(sx1).max(sx2).ceil().min(f64::from(w - 1)) as u32;
         let min_y = sy0.min(sy1).min(sy2).floor().max(0.0) as u32;
@@ -165,7 +175,28 @@ pub fn render_orthographic_rubbing_image(
 
         for py in min_y..=max_y {
             for px in min_x..=max_x {
-                img.put_pixel(px, py, px_color);
+                let fx = f64::from(px) + 0.5;
+                let fy = f64::from(py) + 0.5;
+                let b0 = ((sy1 - sy2) * (fx - sx2) + (sx2 - sx1) * (fy - sy2)) * inv;
+                let b1 = ((sy2 - sy0) * (fx - sx2) + (sx0 - sx2) * (fy - sy2)) * inv;
+                let b2 = 1.0 - b0 - b1;
+                if !(0.0..=1.0).contains(&b0)
+                    || !(0.0..=1.0).contains(&b1)
+                    || !(0.0..=1.0).contains(&b2)
+                {
+                    continue;
+                }
+                // 정점 y(깊이)와 먹값을 barycentric 보간한다.
+                let depth = b0 * p0[1] + b1 * p1[1] + b2 * p2[1];
+                let buf_idx = (py as usize) * (w as usize) + (px as usize);
+                if depth <= zbuf[buf_idx] {
+                    continue;
+                }
+                zbuf[buf_idx] = depth;
+                let ink = (b0 * w0_ink + b1 * w1_ink + b2 * w2_ink).clamp(0.0, 1.0);
+                // 먹색(#141413 = 20) ~ 한지 백색(248)
+                let lum = (248.0 - ink * 224.0).round().clamp(18.0, 248.0) as u8;
+                img.put_pixel(px, py, Rgba([lum, lum, lum.saturating_sub(2), 255]));
             }
         }
     }
