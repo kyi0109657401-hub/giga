@@ -232,6 +232,13 @@ pub fn msii_radii_for_extent(extent_px: u32) -> [u32; 4] {
     ]
 }
 
+/// 봉합선 스패닝 판정 임계 비율 (B6 고정점).
+///
+/// 전개도 양 끝 5% 이내에 정점이 동시에 걸린 삼각형만 봉합 횡단으로 본다.
+/// 기준 폭은 반드시 전개 전체 폭(`UnrollResult::unrolled_width_mm`)이며,
+/// 조각 메쉬의 부분 extent가 아니다.
+pub const SEAM_SPAN_FRACTION: f64 = 0.45;
+
 /// 곡면 전개도에서 봉합선($\theta = \pm\pi$)을 가로지르는 삼각형 판별.
 /// 세 정점의 전개 좌표가 총 폭의 절반 이상 벌어지면 봉합선 스패닝으로 보고 컬링한다.
 pub fn is_seam_spanning_triangle(u: [f64; 3], total_width_mm: f64) -> bool {
@@ -245,8 +252,8 @@ pub fn is_seam_spanning_triangle(u: [f64; 3], total_width_mm: f64) -> bool {
         hi = hi.max(v);
     }
     // 전개 범위는 [-πR, +πR] = [-w/2, +w/2] 이므로,
-    // 양 끝 극단(±45% 폭)에 정점이 동시에 걸린 삼각형만 봉합선 스패닝으로 본다.
-    lo < -total_width_mm * 0.45 && hi > total_width_mm * 0.45
+    // 양 끝 임계(±45% 폭) 바깥에 동시에 걸린 삼각형만 봉합선 스패닝으로 본다.
+    lo < -total_width_mm * SEAM_SPAN_FRACTION && hi > total_width_mm * SEAM_SPAN_FRACTION
 }
 
 pub fn render_orthographic_rubbing_rgba_with_params(
@@ -293,16 +300,21 @@ pub fn render_orthographic_rubbing_rgba_with_params(
 
     // 1. Rayon 병렬 정점 직교 투영 좌표 (u, v, depth) 및 Nelson Max 가중 정점 법선 회전 계산
     // 곡면 전개 탁본 모드에서는 정점별 (호 길이 s, 높이 h, 부조 깊이 Δr) 로 대체한다.
-    let unrolled: Option<Vec<[f64; 3]>> = params.unroll_mode.map(|mode| {
+    let unrolled_resolved: Option<(Vec<[f64; 3]>, f64)> = params.unroll_mode.map(|mode| {
         let res = strata_shade::unroll_mesh_surface(mesh, mode);
+        let width_mm = res.unrolled_width_mm;
         let mut acc = vec![[0.0_f64; 3]; ddg.positions.len()];
         for pt in &res.points {
             if let Some(slot) = acc.get_mut(pt.vertex_index as usize) {
                 *slot = [pt.arc_s_mm, pt.height_h_mm, pt.relief_depth_mm];
             }
         }
-        acc
+        (acc, width_mm)
     });
+    // B6 고정점: 봉합선 판정은 전개 전체 폭 기준이어야 한다.
+    // 조각 메쉬의 부분 extent(du)를 쓰면 봉합 포함 조각의 줄무늬가 컬링되지 않는다.
+    let (unrolled, unroll_full_width_mm): (Option<Vec<[f64; 3]>>, f64) =
+        unrolled_resolved.map_or((None, 0.0), |(a, w)| (Some(a), w));
     // Image 1 ("전부 방향이 같아야한다 탁복한 유물과 방향이다르다"):
     // 3D 직상방/정면 뷰 및 1:1 평면도와 동일한 3D 회전(psi_deg, pose_tilt_deg, pose_roll_deg)을 적용한다!
     let projected: Vec<([f64; 3], [f32; 3])> = ddg
@@ -371,9 +383,17 @@ pub fn render_orthographic_rubbing_rgba_with_params(
         let (p1, n1) = projected[i1];
         let (p2, n2) = projected[i2];
 
-        // 봉합선을 가로지르는 삼각형은 전개도 전체를 가로지르는 줄무늬를 만든다 → 컬링
-        if unrolled.is_some() && is_seam_spanning_triangle([p0[0], p1[0], p2[0]], du) {
-            continue;
+        // 봉합선을 가로지르는 삼각형은 전개도 전체를 가로지르는 줄무늬를 만든다 → 컬링.
+        // 판정 기준은 전개 전체 폭이어야 한다 (조각의 부분 extent가 아님).
+        if unrolled.is_some() {
+            let span_ref = if unroll_full_width_mm > 1e-6 {
+                unroll_full_width_mm
+            } else {
+                du
+            };
+            if is_seam_spanning_triangle([p0[0], p1[0], p2[0]], span_ref) {
+                continue;
+            }
         }
 
         let x0 = (pad + (p0[0] - u_min) * sx) as f32;

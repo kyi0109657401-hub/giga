@@ -266,6 +266,11 @@ fn test_seam_spanning_triangle_is_culled_in_unroll() {
     assert!(!is_seam_spanning_triangle([10.0, 12.0, 15.0], width));
     // 폭이 0 이면 판정 불가 → 컬링하지 않는다.
     assert!(!is_seam_spanning_triangle([-1.0, 0.0, 1.0], 0.0));
+    // B6: 조각 메쉬의 부분 extent가 아니라 전개 전체 폭으로 판정해야 한다.
+    // 전체 폭 364mm 기준으로 92mm 삼각형은 정상 → 컬링 금지.
+    assert!(!is_seam_spanning_triangle([-46.0, 0.0, 46.0], width));
+    // 같은 삼각형도 조각 extent(100mm)로 재면 오판하므로 전체 폭을 써야 한다.
+    assert!(is_seam_spanning_triangle([-46.0, 0.0, 46.0], 100.0));
 }
 
 #[test]
