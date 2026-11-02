@@ -18,6 +18,28 @@ pub const SHEET_GRID_5CM_ALPHA: u8 = 175;
 /// 출판 용지 경계 적색 (task-14 유지 대상 ②).
 pub const PAPER_BORDER_RED_RGB: [u8; 3] = [218, 34, 34];
 
+/// 도판 요소 16진 스트로크 색 → 화면 미리보기 색 결정 (task-20 ③).
+///
+/// 상수값이 아닌 실제 결정 경로를 테스트한다:
+/// `#FF0000`(단면선)은 항상 단면 빨강으로 보존하고,
+/// 적색 계열(`#B5573A`)은 보조색(현재 중립 회색)으로 간다.
+pub fn preview_stroke_color_for_hex(
+    stroke_hex: &str,
+    aux: egui::Color32,
+    profile_red: egui::Color32,
+    select_blue: egui::Color32,
+    muted: egui::Color32,
+    fallback: egui::Color32,
+) -> egui::Color32 {
+    match stroke_hex {
+        "#B5573A" => aux,
+        "#FF0000" => profile_red,
+        "#2A78D6" => select_blue,
+        "#5E5D59" => muted,
+        _ => fallback,
+    }
+}
+
 /// 치수선 구경값 결정 (단일 원천 원칙).
 ///
 /// 항상 측정 리포트값을 돌려준다. 그려진 폭이 달라도 숫자를 바꾸지 않는다 —
@@ -833,13 +855,14 @@ pub fn render_sheet_pane_egui(
             } else if is_horiz_or_aux {
                 (aux_col, snap_to_standard_weight_mm(state.line_style.aux_width_mm))
             } else {
-                let c = match elem.stroke_hex.as_str() {
-                    "#B5573A" => aux_col,
-                    "#FF0000" => profile_red,
-                    "#2A78D6" => select_blue,
-                    "#5E5D59" => muted,
-                    _ => out_col,
-                };
+                let c = preview_stroke_color_for_hex(
+                    elem.stroke_hex.as_str(),
+                    aux_col,
+                    profile_red,
+                    select_blue,
+                    muted,
+                    out_col,
+                );
                 (c, elem.stroke_width_mm as f32)
             };
 

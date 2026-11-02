@@ -943,4 +943,48 @@ mod tests {
             "PDF에 채우기 연산자가 없음"
         );
     }
+
+    #[test]
+    fn test_ui_aux_default_change_does_not_pollute_exports() {
+        // task-20 ①: 화면 보조선 기본값(회색)과 무관하게 export는 원래 테라코타를 유지해야 한다.
+        // 보고 도판 색은 절대 바뀌면 안 된다.
+        let mut plate = minimal_test_plate();
+        plate.paths.push(PlatePathElement {
+            layer_id: String::from("횡단면_실측윤곽선"),
+            points_mm: vec![[10.0, 10.0], [50.0, 10.0], [50.0, 30.0]],
+            closed: false,
+            stroke_hex: String::from("#B5573A"),
+            stroke_width_mm: 0.24,
+            dash_pattern_mm: None,
+            fill_hex: None,
+        });
+        let svg = render_plate_to_illustrator_svg(&plate);
+        assert!(
+            svg.contains("#B5573A"),
+            "SVG export가 테라코타를 유지해야 함"
+        );
+        assert!(
+            !svg.contains("#6E6A62") && !svg.contains("#6e6a62"),
+            "SVG에 화면 보조 회색이 스며들면 안 됨"
+        );
+        let dxf = export_plate_to_dxf_r12(&plate);
+        assert!(
+            dxf.contains("SECTION_SOLID"),
+            "DXF에 실선 레이어가 있어야 함"
+        );
+        assert!(
+            !dxf.contains("6E6A62"),
+            "DXF에 화면 보조 회색이 스며들면 안 됨"
+        );
+        let pdf_bytes = render_plate_to_pdf_bytes(&plate, PaperSheetSize::A4Portrait, 10.0);
+        let pdf = String::from_utf8_lossy(&pdf_bytes);
+        assert!(
+            pdf.lines().any(|l| l.trim_end() == "S"),
+            "PDF에 실선 연산자가 있어야 함"
+        );
+        assert!(
+            !pdf.contains("6E6A62") && !pdf.contains("6e6a62"),
+            "PDF에 화면 보조 회색이 스며들면 안 됨"
+        );
+    }
 }

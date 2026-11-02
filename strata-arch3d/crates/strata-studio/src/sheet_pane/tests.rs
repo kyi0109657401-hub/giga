@@ -5,7 +5,10 @@ use strata_export::PlateRasterKind;
 use strata_measure::compute_artifact_measurements;
 
 use super::config::*;
-use super::render::{resolve_rim_label_width_mm, PAPER_BORDER_RED_RGB, SHEET_GRID_5CM_RGB};
+use super::render::{
+    preview_stroke_color_for_hex, resolve_rim_label_width_mm, PAPER_BORDER_RED_RGB,
+    SHEET_GRID_5CM_RGB,
+};
 use super::rubbing::*;
 use super::state::*;
 use super::widgets::*;
@@ -598,6 +601,25 @@ fn test_red_rules_keep_section_and_paper_but_not_interior() {
 }
 
 #[test]
+fn test_preview_stroke_color_decision_paths() {
+    // task-20 ③: 상수값이 아니라 실제 색 결정 경로를 검증한다.
+    // 서로 다른 감시색으로 각 분기를 식별한다.
+    use egui::Color32;
+    let aux = Color32::from_rgb(1, 2, 3);
+    let profile = Color32::from_rgb(4, 5, 6);
+    let select = Color32::from_rgb(7, 8, 9);
+    let muted = Color32::from_rgb(10, 11, 12);
+    let fallback = Color32::from_rgb(13, 14, 15);
+    let decide = |hex| preview_stroke_color_for_hex(hex, aux, profile, select, muted, fallback);
+    assert_eq!(decide("#B5573A"), aux, "테라코타는 보조색으로 가야 함");
+    assert_eq!(decide("#FF0000"), profile, "단면 빨강은 보존되어야 함");
+    assert_eq!(decide("#2A78D6"), select);
+    assert_eq!(decide("#5E5D59"), muted);
+    assert_eq!(decide("#123456"), fallback, "미지정 색은 폴백으로 가야 함");
+    assert_eq!(decide(""), fallback);
+}
+
+#[test]
 fn test_tdd21_all8_feedback_illustrator_vector_plan_measured_hsec_and_individual_flips() {
     // 1. Image 0 & Image 1: 기본값에서 좌측 평단면은 일러스트용 순수 벡터 선화(show_elevation_rubbing_overlay == false)이고,
     //    우측 상단에 1:1 정밀 탁본(BottomPlanRubbing)이 배치됨을 검증
@@ -1054,10 +1076,11 @@ fn make_flat_bump_mesh() -> TriMesh {
 }
 
 fn mean_ink_in_disk(img: &RgbaImage, cx: u32, cy: u32, r: u32) -> f64 {
+    // u32 덧셈 오버플로 방지: 상한 클램프와 함께 saturating_add를 쓴다.
     let mut sum = 0.0f64;
     let mut cnt = 0u64;
-    for y in cy.saturating_sub(r)..=(cy + r).min(img.height() - 1) {
-        for x in cx.saturating_sub(r)..=(cx + r).min(img.width() - 1) {
+    for y in cy.saturating_sub(r)..=cy.saturating_add(r).min(img.height() - 1) {
+        for x in cx.saturating_sub(r)..=cx.saturating_add(r).min(img.width() - 1) {
             let dx = x as i64 - cx as i64;
             let dy = y as i64 - cy as i64;
             if dx * dx + dy * dy > (r as i64) * (r as i64) {
@@ -1144,12 +1167,13 @@ fn test_msii_normalization_adapts_to_relief_scale() {
 }
 
 fn mean_ink_in_annulus(img: &RgbaImage, cx: u32, cy: u32, r0: u32, r1: u32) -> f64 {
+    // u32 덧셈 오버플로 방지: 상한 클램프와 함께 saturating_add를 쓴다.
     let mut sum = 0.0f64;
     let mut cnt = 0u64;
     let r1sq = (r1 as i64) * (r1 as i64);
     let r0sq = (r0 as i64) * (r0 as i64);
-    for y in cy.saturating_sub(r1)..=(cy + r1).min(img.height() - 1) {
-        for x in cx.saturating_sub(r1)..=(cx + r1).min(img.width() - 1) {
+    for y in cy.saturating_sub(r1)..=cy.saturating_add(r1).min(img.height() - 1) {
+        for x in cx.saturating_sub(r1)..=cx.saturating_add(r1).min(img.width() - 1) {
             let dx = x as i64 - cx as i64;
             let dy = y as i64 - cy as i64;
             let d2 = dx * dx + dy * dy;
