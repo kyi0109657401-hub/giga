@@ -18,8 +18,9 @@ pub use plate_composer::{
 };
 pub use ret_exporter::{export_ret_folder_package, RetPackageManifest};
 pub use svg_illustrator::{
-    render_plate_to_illustrator_svg, render_plate_to_illustrator_svg_with_meta,
-    render_plate_to_illustrator_svg_with_options,
+    base64_encode, render_plate_to_illustrator_svg, render_plate_to_illustrator_svg_with_meta,
+    render_plate_to_illustrator_svg_with_options, render_plate_to_illustrator_svg_with_photos,
+    PhotoSlot,
 };
 
 #[cfg(test)]
@@ -253,6 +254,41 @@ mod tests {
         // 빈/퇴화 입력은 조용히 빈 결과.
         assert!(hatch_polygon_45(&[], 2.0).is_empty());
         assert!(hatch_polygon_45(&square, 0.0).is_empty());
+    }
+
+    #[test]
+    fn test_base64_encoder_matches_rfc4648_vectors() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn test_photo_slot_embeds_image_and_skips_missing_file() {
+        let plate = minimal_test_plate();
+        let tmp = std::env::temp_dir().join("strata_ci_photo_probe.png");
+        std::fs::write(&tmp, b"\x89PNG\r\n\x1a\n").expect("temp png");
+        let missing = std::env::temp_dir().join("strata_ci_photo_missing.png");
+
+        let photos = vec![
+            PhotoSlot {
+                rect_mm: [10.0, 60.0, 90.0, 78.0],
+                path: &tmp,
+            },
+            PhotoSlot {
+                rect_mm: [10.0, 40.0, 90.0, 58.0],
+                path: &missing,
+            },
+        ];
+        let svg = render_plate_to_illustrator_svg_with_photos(&plate, "", false, &photos);
+        assert!(svg.contains(r#"id="유물사진""#), "사진 레이어 없음");
+        assert!(svg.contains(r#"id="유물사진_1""#));
+        assert!(svg.contains("data:image/png;base64,"));
+        // 없는 파일은 조용히 건너뛴다(2번 슬롯 미생성).
+        assert!(!svg.contains(r#"id="유물사진_2""#));
+        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]

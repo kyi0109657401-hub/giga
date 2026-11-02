@@ -36,8 +36,7 @@ use strata_core::{
 use strata_export::{
     append_artifact_label_block, append_section_hatching, compose_archaeological_plate,
     compose_archaeological_plate_with_mode, compute_tiled_print_plan, export_ret_folder_package,
-    render_plate_to_illustrator_svg_with_options, render_plate_to_pdf_bytes, ComposedPlate2D,
-    PaperSheetSize, PlateComposeInput, PlateLayoutMode,
+    render_plate_to_pdf_bytes, ComposedPlate2D, PaperSheetSize, PlateComposeInput, PlateLayoutMode,
 };
 use strata_io::{load_any_mesh, Ap2Project, DarchProject};
 use strata_measure::{compute_artifact_measurements, ArtifactMeasurementReport};
@@ -905,10 +904,51 @@ impl StrataStudioApp {
                     let provenance = crate::sheet_pane::rubbing_provenance_line(
                         &self.sheet_state.rubbing_params,
                     );
-                    let svg = render_plate_to_illustrator_svg_with_options(
+                    // 스캔 옆 동반 사진(`{stem}_1.jpg` 등)을 도판 사진 슬롯으로 자동 배치한다.
+                    let mut photo_paths: Vec<std::path::PathBuf> = Vec::new();
+                    if let Some(src) = slot.source_path.as_ref() {
+                        if let (Some(dir), Some(stem)) =
+                            (src.parent(), src.file_stem().and_then(|s| s.to_str()))
+                        {
+                            for ext in ["jpg", "jpeg", "png", "webp"] {
+                                let cand = dir.join(format!("{stem}_1.{ext}"));
+                                if cand.is_file() {
+                                    photo_paths.push(cand);
+                                    break;
+                                }
+                            }
+                            for ext in ["jpg", "jpeg", "png", "webp"] {
+                                let cand = dir.join(format!("{stem}_2.{ext}"));
+                                if cand.is_file() {
+                                    photo_paths.push(cand);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    let cw = slot.composed_plate.canvas_width_mm;
+                    let ch = slot.composed_plate.canvas_height_mm;
+                    let margin = cw * 0.08;
+                    let gap = cw * 0.04;
+                    let band_h = ch * 0.16;
+                    let y0 = ch * 0.26;
+                    let slot_w = (cw - margin * 2.0 - gap) * 0.5;
+                    let rects = [
+                        [margin, y0, margin + slot_w, y0 + band_h],
+                        [margin + slot_w + gap, y0, cw - margin, y0 + band_h],
+                    ];
+                    let mut photo_slots = Vec::new();
+                    for (i, p) in photo_paths.iter().take(2).enumerate() {
+                        photo_slots.push(strata_export::PhotoSlot {
+                            rect_mm: rects[i],
+                            path: p.as_path(),
+                        });
+                    }
+                    let svg = strata_export::render_plate_to_illustrator_svg_with_photos(
                         &slot.composed_plate,
                         &provenance,
                         true,
+                        &photo_slots,
                     );
                     if std::fs::write(&out_path, svg.as_bytes()).is_ok() {
                         self.status_message =

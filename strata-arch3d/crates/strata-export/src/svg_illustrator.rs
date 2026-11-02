@@ -4,11 +4,97 @@ use std::fmt::Write as _;
 /// `1 mm = 5 px` 표준 SVG 출력 스케일 계약 (`V7`).
 pub const PX_PER_MM_1TO1: f64 = 5.0;
 
+/// 도판에 삽입할 유물 실사 사진 슬롯(`rect_mm` = `[min_x, min_y, max_x, max_y]`).
+#[derive(Debug)]
+pub struct PhotoSlot<'a> {
+    pub rect_mm: [f64; 4],
+    pub path: &'a std::path::Path,
+}
+
+/// 표준 Base64 인코더(외부 크레이트 없이 SVG `<image>` 임베드용).
+pub fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((n >> 18) & 63) as usize] as char);
+        out.push(TABLE[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+fn photo_mime(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        "webp" => "image/webp",
+        _ => "image/jpeg",
+    }
+}
+
 /// 합성된 2D 도판(`ComposedPlate2D`)을 Adobe Illustrator 호환 다중 레이어 SVG(`유물제도선.ai` / `.svg`)로 직렬화한다.
 /// - `1 mm = 5 px` (`PX_PER_MM_1TO1 = 5.0`) 정밀 스케일 계약을 준수한다.
 /// - 네 모서리에 `1×1 px` 투명 정렬 앵커 `<rect>`를 삽입하여 래스터 탁본 PNG와 Illustrator에서 0.00 px 오차로 겹쳐지게 한다 (`V7`).
 pub fn render_plate_to_illustrator_svg(plate: &ComposedPlate2D) -> String {
     render_plate_to_illustrator_svg_with_meta(plate, "")
+}
+
+/// 유물 실사 사진을 SVG `<image>` 로 임베드한판(「유물 편집판」 템플릿의 사진 배치).
+pub fn render_plate_to_illustrator_svg_with_photos(
+    plate: &ComposedPlate2D,
+    provenance: &str,
+    draw_grid: bool,
+    photos: &[PhotoSlot<'_>],
+) -> String {
+    let mut svg = render_plate_to_illustrator_svg_with_options(plate, provenance, draw_grid);
+    if photos.is_empty() {
+        return svg;
+    }
+    let px = |mm: f64| mm * PX_PER_MM_1TO1;
+    let mut block = String::new();
+    let _ = writeln!(block, r#"  <g id="유물사진">"#);
+    for (i, slot) in photos.iter().enumerate() {
+        let Ok(bytes) = std::fs::read(slot.path) else {
+            continue;
+        };
+        let b64 = base64_encode(&bytes);
+        let mime = photo_mime(slot.path);
+        let [x0, y0, x1, y1] = slot.rect_mm;
+        let _ = writeln!(
+            block,
+            r#"    <image id="유물사진_{n}" x="{x:.2}" y="{y:.2}" width="{w:.2}" height="{h:.2}" preserveAspectRatio="xMidYMid meet" xlink:href="data:{mime};base64,{b64}" />"#,
+            n = i + 1,
+            x = px(x0.min(x1)),
+            y = px(y0.min(y1)),
+            w = px((x1 - x0).abs()),
+            h = px((y1 - y0).abs()),
+            mime = mime,
+            b64 = b64
+        );
+    }
+    let _ = writeln!(block, "  </g>");
+    if let Some(pos) = svg.rfind("</svg>") {
+        svg.insert_str(pos, &block);
+    }
+    svg
 }
 
 /// `provenance` 문자열을 SVG `<metadata>` 와 숨김 레이어로 각인해 도판의 재현 근거를 남긴다.
@@ -36,7 +122,7 @@ pub fn render_plate_to_illustrator_svg_with_options(
     );
     let _ = writeln!(
         svg,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w_px:.0}px" height="{h_px:.0}px" viewBox="0 0 {w_px:.0} {h_px:.0}" data-scale-px-per-mm="{PX_PER_MM_1TO1:.1}" data-plate-mode="{:?}">"#,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{w_px:.0}px" height="{h_px:.0}px" viewBox="0 0 {w_px:.0} {h_px:.0}" data-scale-px-per-mm="{PX_PER_MM_1TO1:.1}" data-plate-mode="{:?}">"#,
         plate.mode
     );
     if !provenance.is_empty() {
