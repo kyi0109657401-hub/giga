@@ -48,7 +48,14 @@ pub fn transform_local_vertex_full(
     [x3 + offset_x_mm, y3, z3 + z_mid]
 }
 
-/// 법선 벡터에 동일한 3축 회전(`ψ`, `tilt_deg`, `roll_deg + inner_level_deg`)을 적용한다.#[inline]
+/// 뷰포트 격자·중심선 중립 회색 (라이트·다크 공용).
+///
+/// 사용자 피드백: 격자의 빨간색을 제거한다. 기능선인 단면선 빨강(`#FF0000`,
+/// `PROFILE_RED`)은 유지한다. 회색은 흰 종이·밤 뷰포트 양쪽에서 보인다.
+pub const VIEWPORT_GRID_GRAY: [u8; 3] = [122, 118, 108];
+
+/// 법선 벡터에 동일한 3축 회전(`ψ`, `tilt_deg`, `roll_deg + inner_level_deg`)을 적용한다.
+#[inline]
 #[allow(clippy::too_many_arguments)]
 pub fn transform_local_normal_full(
     n: [f64; 3],

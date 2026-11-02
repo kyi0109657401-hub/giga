@@ -44,13 +44,16 @@ impl ThemeMode {
 
 /// 다크 팔레트 (화면 UI 전용).
 ///
-/// - 밤종이 바탕 `#23211D` · 작업대 `#161513` · 달빛 한지 글자 `#EAE4D6`.
+/// - 밤종이 바탕 `#23211D` · 작업대 `#161513` · 뷰포트 `#201E1A`(한 단계 밝게) ·
+///   달빛 한지 글자 `#EAE4D6`.
 /// - 흙(테라코타) 강조는 라이트와 같은 `#B5573A`를 써서 강조색 일관성을 유지한다.
 pub mod dark {
     /// 밤종이 (패널·창 바탕).
     pub const PANEL: [u8; 3] = [0x23, 0x21, 0x1D];
-    /// 밤 작업대 (중앙 여백·뷰포트 바탕).
+    /// 밤 작업대 (중앙 여백 바탕).
     pub const DESK: [u8; 3] = [0x16, 0x15, 0x13];
+    /// 밤 뷰포트 바탕 (작업대보다 한 단계 밝게 — 유물 음영 디테일 매몰 방지).
+    pub const VIEWPORT_BG: [u8; 3] = [0x20, 0x1E, 0x1A];
     /// 달빛 한지 (기본 글자).
     pub const INK: [u8; 3] = [0xEA, 0xE4, 0xD6];
     /// 달빛 보조 글자.
@@ -89,6 +92,8 @@ pub struct UiChrome {
     pub accent: egui::Color32,
     /// 실측 도판 용지 — 항상 흰색 (출력물 불변 철칙).
     pub paper: egui::Color32,
+    /// 3D 뷰포트 바탕 — 다크에서만 작업대와 분리된다 (라이트는 흰 면과 동일).
+    pub viewport_bg: egui::Color32,
 }
 
 fn rgb(c: [u8; 3]) -> egui::Color32 {
@@ -111,6 +116,7 @@ pub fn chrome_for(mode: ThemeMode) -> UiChrome {
             select_text: rgb(dark::SELECT_TEXT),
             accent: rgb(ACTION.rgb),
             paper: rgb(SURFACE.rgb),
+            viewport_bg: rgb(dark::VIEWPORT_BG),
         }
     } else {
         UiChrome {
@@ -126,6 +132,7 @@ pub fn chrome_for(mode: ThemeMode) -> UiChrome {
             select_text: rgb(INK.rgb),
             accent: rgb(ACTION.rgb),
             paper: rgb(SURFACE.rgb),
+            viewport_bg: rgb(SURFACE.rgb),
         }
     }
 }
@@ -209,6 +216,20 @@ mod tests {
         assert_ne!(dark.ink, light.ink, "글자는 다크에서 바뀌어야 함");
         assert_eq!(dark.paper, light.paper, "용지는 바뀌면 안 됨");
         assert_eq!(dark.accent, light.accent, "강조 흙색은 양쪽 동일");
+    }
+
+    #[test]
+    fn test_dark_viewport_bg_is_one_step_brighter_than_desk() {
+        // 사용자 피드백 ①: 완전흑 작업대에서 한 단계 밝게.
+        let dark = chrome_for(ThemeMode::Dark);
+        assert_eq!(dark.viewport_bg, rgb(dark::VIEWPORT_BG));
+        let luma = |c: [u8; 3]| (u16::from(c[0]) + u16::from(c[1]) + u16::from(c[2])) / 3;
+        assert!(
+            luma(dark::VIEWPORT_BG) > luma(dark::DESK),
+            "뷰포트 배경이 작업대보다 밝아야 함"
+        );
+        let light = chrome_for(ThemeMode::Light);
+        assert_eq!(light.viewport_bg, rgb(SURFACE.rgb), "라이트 뷰포트는 흰 면");
     }
 
     #[test]

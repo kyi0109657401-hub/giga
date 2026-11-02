@@ -49,7 +49,7 @@ pub fn render_view3d_pane_egui(
     // 다크 모드에서는 뷰포트 바탕만 다크로 바꾼다. 측정 격자·유물·칩·글자 색상은 그대로 둔다
     // (칩은 밝은 바탕을 유지하므로 가독성이 깨지지 않는다. 실측 출력물 색상 불변 철칙).
     let viewport_bg = if state.dark_mode {
-        crate::theme::chrome_for(crate::theme::ThemeMode::Dark).desk
+        crate::theme::chrome_for(crate::theme::ThemeMode::Dark).viewport_bg
     } else {
         surface
     };
@@ -231,18 +231,18 @@ pub fn render_view3d_pane_egui(
             );
         }
 
-        // 동심원은 항상 1:1 정원(둥근 원)이며 중앙에 고정됨
+        // 동심원은 항상 1:1 정원(둥근 원)이며 중앙에 고정됨 (격자 적색 제거 → 중립 회색)
         for rk in 1..=5 {
             let r_px = r_120_px * (rk as f32 / 5.0);
             tp.circle_stroke(
                 td_center,
                 r_px,
                 egui::Stroke::new(
-                    if rk == 5 { 1.3_f32 } else { 0.8_f32 },
+                    if rk == 5 { 1.0_f32 } else { 0.6_f32 },
                     egui::Color32::from_rgba_unmultiplied(
-                        156,
-                        74,
-                        47,
+                        super::geometry::VIEWPORT_GRID_GRAY[0],
+                        super::geometry::VIEWPORT_GRID_GRAY[1],
+                        super::geometry::VIEWPORT_GRID_GRAY[2],
                         if rk == 5 { 170 } else { 95 },
                     ),
                 ),
@@ -251,23 +251,31 @@ pub fn render_view3d_pane_egui(
         tp.circle_stroke(
             td_center,
             r_100_px,
-            egui::Stroke::new(1.1_f32, egui::Color32::from_rgba_unmultiplied(42, 120, 214, 150)),
+            egui::Stroke::new(
+                0.9_f32,
+                egui::Color32::from_rgba_unmultiplied(
+                    super::geometry::VIEWPORT_GRID_GRAY[0],
+                    super::geometry::VIEWPORT_GRID_GRAY[1],
+                    super::geometry::VIEWPORT_GRID_GRAY[2],
+                    150,
+                ),
+            ),
         );
 
-        // 직상방 십자 기준선 (0°·90°·180°·270°)
+        // 직상방 십자 기준선 (0°·90°·180°·270°) — 중립 회색 유지, 한 단계 얇게
         tp.line_segment(
             [
                 egui::pos2(td_center.x - r_120_px - 8.0, td_center.y),
                 egui::pos2(td_center.x + r_120_px + 8.0, td_center.y),
             ],
-            egui::Stroke::new(0.9_f32, egui::Color32::from_rgba_unmultiplied(94, 93, 89, 130)),
+            egui::Stroke::new(0.7_f32, egui::Color32::from_rgba_unmultiplied(94, 93, 89, 130)),
         );
         tp.line_segment(
             [
                 egui::pos2(td_center.x, td_center.y - r_120_px - 8.0),
                 egui::pos2(td_center.x, td_center.y + r_120_px + 8.0),
             ],
-            egui::Stroke::new(0.9_f32, egui::Color32::from_rgba_unmultiplied(94, 93, 89, 130)),
+            egui::Stroke::new(0.7_f32, egui::Color32::from_rgba_unmultiplied(94, 93, 89, 130)),
         );
 
         // Image 1 ("단면선이 유물에가려진다"): 단면선이 3D 유물에 절대 가려지지 않도록 밝은 외곽 후광(Halo) + 최상단 선으로 렌더링!
@@ -278,7 +286,7 @@ pub fn render_view3d_pane_egui(
                 egui::pos2(td_center.x + r_120_px + 10.0, fixed_cut_sy),
             ],
             egui::Stroke::new(
-                4.2_f32,
+                3.8_f32,
                 egui::Color32::from_rgba_unmultiplied(255, 252, 235, 220),
             ),
         );
@@ -287,7 +295,7 @@ pub fn render_view3d_pane_egui(
                 egui::pos2(td_center.x - r_120_px - 10.0, fixed_cut_sy),
                 egui::pos2(td_center.x + r_120_px + 10.0, fixed_cut_sy),
             ],
-            egui::Stroke::new(2.0_f32, select_blue),
+            egui::Stroke::new(1.6_f32, select_blue),
         );
 
         state.ensure_3d_curves_cached(mesh);
@@ -307,11 +315,11 @@ pub fn render_view3d_pane_egui(
             tp.line_segment(
                 [p0, p1],
                 egui::Stroke::new(
-                    4.6_f32,
+                    4.2_f32,
                     egui::Color32::from_rgba_unmultiplied(255, 250, 210, 235),
                 ),
             );
-            tp.line_segment([p0, p1], egui::Stroke::new(2.8_f32, profile_red));
+            tp.line_segment([p0, p1], egui::Stroke::new(2.4_f32, profile_red));
         }
 
         // Image 5: 사용자가 추가한 단면선(`A — A'`)과 한쪽 끝점만 독립 이동 가능한 핸들(`A`, `A'`) 렌더링
@@ -327,11 +335,11 @@ pub fn render_view3d_pane_egui(
             tp.line_segment(
                 [ep0_px, ep1_px],
                 egui::Stroke::new(
-                    4.4_f32,
+                    4.0_f32,
                     egui::Color32::from_rgba_unmultiplied(255, 252, 230, 235),
                 ),
             );
-            tp.line_segment([ep0_px, ep1_px], egui::Stroke::new(2.4_f32, profile_red));
+            tp.line_segment([ep0_px, ep1_px], egui::Stroke::new(2.0_f32, profile_red));
             for (ep_px, lbl) in [(ep0_px, "A"), (ep1_px, "A'")] {
                 tp.circle_filled(ep_px, 6.2, egui::Color32::WHITE);
                 tp.circle_stroke(ep_px, 6.2, egui::Stroke::new(2.0_f32, profile_red));
@@ -664,13 +672,21 @@ pub fn render_view3d_pane_egui(
             egui::pos2(rect.left() + s[0] as f32, rect.top() + s[1] as f32)
         };
 
-        // 수평 바닥 동심원 기준선 (`Z = 0` 평면)
+        // 수평 바닥 동심원 기준선 (`Z = 0` 평면) — 격자 적색 제거, 중립 회색 + 한 단계 얇게
         if state.show_concentric_scope {
             let b0 = proj_pos2([-grid_r_mm, state.cut_y_mm, 0.0]);
             let b1 = proj_pos2([grid_r_mm, state.cut_y_mm, 0.0]);
             painter.line_segment(
                 [b0, b1],
-                egui::Stroke::new(1.2_f32, egui::Color32::from_rgba_unmultiplied(156, 74, 47, 165)),
+                egui::Stroke::new(
+                    1.0_f32,
+                    egui::Color32::from_rgba_unmultiplied(
+                        super::geometry::VIEWPORT_GRID_GRAY[0],
+                        super::geometry::VIEWPORT_GRID_GRAY[1],
+                        super::geometry::VIEWPORT_GRID_GRAY[2],
+                        165,
+                    ),
+                ),
             );
         }
 
@@ -695,7 +711,19 @@ pub fn render_view3d_pane_egui(
 
             let ax_bot = proj_pos2([state.artifact_offset_x_mm, y_cut, -4.0]);
             let ax_top = proj_pos2([state.artifact_offset_x_mm, y_cut, hh + 2.0]);
-            painter.line_segment([ax_bot, ax_top], egui::Stroke::new(1.3_f32, terra));
+            // 수직 중심축선 — 중립 회색으로, 한 단계 얇게
+            painter.line_segment(
+                [ax_bot, ax_top],
+                egui::Stroke::new(
+                    1.0_f32,
+                    egui::Color32::from_rgba_unmultiplied(
+                        super::geometry::VIEWPORT_GRID_GRAY[0],
+                        super::geometry::VIEWPORT_GRID_GRAY[1],
+                        super::geometry::VIEWPORT_GRID_GRAY[2],
+                        255,
+                    ),
+                ),
+            );
 
             for seg in &state.cached_v_segs {
                 let a = proj_pos2(seg[0]);
@@ -705,11 +733,11 @@ pub fn render_view3d_pane_egui(
                 painter.line_segment(
                     [a, b],
                     egui::Stroke::new(
-                        4.2_f32,
+                        3.8_f32,
                         egui::Color32::from_rgba_unmultiplied(255, 250, 210, 230),
                     ),
                 );
-                painter.line_segment([a, b], egui::Stroke::new(2.2_f32, profile_red));
+                painter.line_segment([a, b], egui::Stroke::new(1.8_f32, profile_red));
             }
 
             // Image 0 & Image 1: 수평횡단면 절단선이 유물에 절대 가려지지 않도록 전체 가로지르는 기준선 + 교차선 최상단 렌더링
@@ -719,11 +747,11 @@ pub fn render_view3d_pane_egui(
             painter.line_segment(
                 [h_left, h_right],
                 egui::Stroke::new(
-                    4.0_f32,
+                    3.6_f32,
                     egui::Color32::from_rgba_unmultiplied(255, 252, 232, 225),
                 ),
             );
-            painter.line_segment([h_left, h_right], egui::Stroke::new(2.0_f32, profile_red));
+            painter.line_segment([h_left, h_right], egui::Stroke::new(1.6_f32, profile_red));
 
             for seg in &state.cached_h_segs {
                 let a = proj_pos2(seg[0]);
@@ -731,11 +759,11 @@ pub fn render_view3d_pane_egui(
                 painter.line_segment(
                     [a, b],
                     egui::Stroke::new(
-                        3.6_f32,
+                        3.2_f32,
                         egui::Color32::from_rgba_unmultiplied(255, 250, 215, 225),
                     ),
                 );
-                painter.line_segment([a, b], egui::Stroke::new(2.0_f32, profile_red));
+                painter.line_segment([a, b], egui::Stroke::new(1.6_f32, profile_red));
             }
         }
 
@@ -744,9 +772,15 @@ pub fn render_view3d_pane_egui(
         // 상단 직상방 동심원 평면도와 하단 수평 정면 입면도가 100% 1:1 동일한 스케일(td_scale == scale)을 공유하므로
         // 좌측 절단점·중심축·우측 절단점이 기울어지지 않고 90° 수직 점선으로 1:1 직결된다!
         // =========================================================================================
+        // 상·하 90° 수직 점선 정렬 가이드 — 중립 회색으로, 한 단계 얇게
         let link_stroke = egui::Stroke::new(
-            1.1_f32,
-            egui::Color32::from_rgba_unmultiplied(200, 48, 36, 175),
+            0.9_f32,
+            egui::Color32::from_rgba_unmultiplied(
+                super::geometry::VIEWPORT_GRID_GRAY[0],
+                super::geometry::VIEWPORT_GRID_GRAY[1],
+                super::geometry::VIEWPORT_GRID_GRAY[2],
+                175,
+            ),
         );
         let center_x = td_center.x + (state.artifact_offset_x_mm * td_scale) as f32;
         draw_vertical_dashed_line(&tp, center_x, fixed_cut_sy, top_rect.bottom(), link_stroke);

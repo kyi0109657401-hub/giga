@@ -173,7 +173,10 @@ fn test_tdd1_view3d_dirty_cache_skips_redundant_rerender_and_supports_hd_resolut
     );
     assert_eq!((w2, h2), (560, 560));
 
-    state.active_section_angle_deg = 45.0;
+    let mut state = View3DPaneState {
+        active_section_angle_deg: 45.0,
+        ..state
+    };
     let (_, _, recomputed3) = state.ensure_zbuffer_cached(&mesh, None, 560, 560, 1.0);
     assert!(
         recomputed3,
@@ -476,17 +479,18 @@ fn test_dark_mode_invalidates_zbuffer_cache_and_darkens_viewport_bg() {
     let (_, _, recomputed3) = state.ensure_zbuffer_cached(&mesh, None, 120, 120, 1.0);
     assert!(recomputed3, "다크 전환 시 캐시가 무효화되어야 함");
     let img = state.cached_zbuffer_rgba.as_ref().expect("cached image");
+    // 사용자 피드백 ①: 밤 작업대보다 한 단계 밝은 뷰포트 배경이어야 한다.
     let dark_bg_px = img
         .pixels()
         .filter(|p| {
-            p.0[0] == crate::theme::dark::DESK[0]
-                && p.0[1] == crate::theme::dark::DESK[1]
-                && p.0[2] == crate::theme::dark::DESK[2]
+            p.0[0] == crate::theme::dark::VIEWPORT_BG[0]
+                && p.0[1] == crate::theme::dark::VIEWPORT_BG[1]
+                && p.0[2] == crate::theme::dark::VIEWPORT_BG[2]
         })
         .count();
     assert!(
         dark_bg_px > 1_000,
-        "다크 래스터에 밤 작업대 배경이 있어야 함: {dark_bg_px}"
+        "다크 래스터에 한 단계 밝은 뷰포트 배경이 있어야 함: {dark_bg_px}"
     );
 }
 
@@ -569,6 +573,39 @@ fn test_section_width_stays_equal_to_report_across_poses() {
         assert!(
             (w - w0).abs() < 1.0,
             "psi={psi}에서 단면 반폭이 어긋남: {w} vs {w0}"
+        );
+    }
+}
+
+#[test]
+fn test_viewport_grid_has_no_red_in_either_theme() {
+    // 사용자 피드백 ②: 격자 적색(156,74,47) 제거 → 중립 회색.
+    // 단면선 빨강(PROFILE_RED)은 기능선이라 유지되므로 여기서는 검사하지 않는다.
+    let mesh = make_test_bowl_mesh();
+    for dark in [false, true] {
+        let mut state = View3DPaneState {
+            dark_mode: dark,
+            ..Default::default()
+        };
+        let (_, _, recomputed) = state.ensure_topdown_cached(&mesh, 200, 200, 1.0);
+        assert!(recomputed);
+        let img = state.cached_topdown_rgba.as_ref().expect("cached image");
+        let red_px = img
+            .pixels()
+            .filter(|p| p.0[0] == 156 && p.0[1] == 74 && p.0[2] == 47)
+            .count();
+        assert_eq!(red_px, 0, "dark={dark}: 격자에 적색이 남아 있음");
+        let gray_px = img
+            .pixels()
+            .filter(|p| {
+                p.0[0] == VIEWPORT_GRID_GRAY[0]
+                    && p.0[1] == VIEWPORT_GRID_GRAY[1]
+                    && p.0[2] == VIEWPORT_GRID_GRAY[2]
+            })
+            .count();
+        assert!(
+            gray_px > 100,
+            "dark={dark}: 중립 회색 격자가 그려져야 함: {gray_px}"
         );
     }
 }

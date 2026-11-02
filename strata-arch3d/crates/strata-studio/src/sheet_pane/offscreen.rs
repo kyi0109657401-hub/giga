@@ -176,7 +176,11 @@ fn render_full_workspace_offscreen_png_inner(
     };
 
     if v3d_w > 0 {
-        let v3d_state = crate::view3d_pane::View3DPaneState::default();
+        // 다크 캡처는 실제 앱과 같은 밤 뷰포트 바탕·음영으로 렌더링한다.
+        let v3d_state = crate::view3d_pane::View3DPaneState {
+            dark_mode,
+            ..crate::view3d_pane::View3DPaneState::default()
+        };
         let v3d_img = crate::view3d_pane::render_mesh_zbuffer_rgba(
             mesh,
             None,

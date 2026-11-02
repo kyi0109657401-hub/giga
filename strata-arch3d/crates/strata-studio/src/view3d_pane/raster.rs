@@ -45,7 +45,12 @@ pub(crate) fn draw_background_millimeter_grid_rgba(
         let px = (half_w + f64::from(ix) * step_2mm_px).round() as i32;
         if px >= 0 && (px as usize) < w_usize {
             let col = if ix == 0 {
-                Rgba([156, 74, 47, 255])
+                Rgba([
+                    VIEWPORT_GRID_GRAY[0],
+                    VIEWPORT_GRID_GRAY[1],
+                    VIEWPORT_GRID_GRAY[2],
+                    255,
+                ])
             } else if ix % 5 == 0 {
                 Rgba([206, 200, 184, 255])
             } else {
@@ -60,7 +65,12 @@ pub(crate) fn draw_background_millimeter_grid_rgba(
         let py = (half_h + f64::from(iy) * step_2mm_px).round() as i32;
         if py >= 0 && (py as usize) < h_usize {
             let col = if iy == 0 {
-                Rgba([156, 74, 47, 255])
+                Rgba([
+                    VIEWPORT_GRID_GRAY[0],
+                    VIEWPORT_GRID_GRAY[1],
+                    VIEWPORT_GRID_GRAY[2],
+                    255,
+                ])
             } else if iy % 5 == 0 {
                 Rgba([206, 200, 184, 255])
             } else {
@@ -92,10 +102,10 @@ pub fn render_topdown_concentric_plan_rgba(
 ) -> RgbaImage {
     let w_usize = width.max(32) as usize;
     let h_usize = height.max(32) as usize;
-    // 다크 모드에서는 뷰포트 바탕을 밤 작업대로 칠한다(격자·유물 색상은 불변).
+    // 다크 모드에서는 뷰포트 바탕을 밤 작업대보다 한 단계 밝게 칠한다(격자·유물 색상은 불변).
     // 캐시키에 dark_mode이 포함되므로 모드 전환 시 다시 렌더링된다.
     let bg = if state.dark_mode {
-        crate::theme::dark::DESK
+        crate::theme::dark::VIEWPORT_BG
     } else {
         SURFACE.rgb
     };
@@ -184,8 +194,10 @@ pub fn render_topdown_concentric_plan_rgba(
         );
         let ldir = state.compute_light_direction_vector();
         let ndotl_td = (wn[0] * ldir[0] + wn[1] * ldir[1] + wn[2].abs() * ldir[2]).abs();
-        let light_gain =
-            ((0.76 + 0.28 * ndotl_td) * f64::from(state.light_intensity)).clamp(0.55, 1.38) as f32;
+        // 다크 모드에서는 음영 하한을 올려 어두운 면 디테일 매몰을 막는다 (라이트 경로 불변).
+        let td_floor = if state.dark_mode { 0.62 } else { 0.55 };
+        let light_gain = ((0.76 + 0.28 * ndotl_td) * f64::from(state.light_intensity))
+            .clamp(td_floor, 1.38) as f32;
         let uvs = if has_uvs {
             mesh.triangle_uvs[t_idx]
         } else {
@@ -249,7 +261,7 @@ pub fn render_mesh_zbuffer_rgba(
     let w_usize = width.max(16) as usize;
     let h_usize = height.max(16) as usize;
     let bg = if state.dark_mode {
-        crate::theme::dark::DESK
+        crate::theme::dark::VIEWPORT_BG
     } else {
         SURFACE.rgb
     };
@@ -370,10 +382,17 @@ pub fn render_mesh_zbuffer_rgba(
         let ndotl = raw_dot.abs();
         let spec = ndotl.powi(12) * 0.14;
         let back_atten = if is_backface { 0.88 } else { 1.0 };
-        let light_gain = if active_mode == View3DShaderMode::PhotoTexture {
-            (((0.76 + 0.28 * ndotl) * back_atten) * light_int).clamp(0.50, 1.38) as f32
+        // 다크 모드에서는 음영 하한을 올려 어두운 면 디테일 매몰을 막는다 (라이트 경로 불변).
+        let (photo_floor, solid_floor) = if state.dark_mode {
+            (0.58, 0.30)
         } else {
-            (((0.38 + 0.56 * ndotl + spec) * back_atten) * light_int).clamp(0.22, 1.45) as f32
+            (0.50, 0.22)
+        };
+        let light_gain = if active_mode == View3DShaderMode::PhotoTexture {
+            (((0.76 + 0.28 * ndotl) * back_atten) * light_int).clamp(photo_floor, 1.38) as f32
+        } else {
+            (((0.38 + 0.56 * ndotl + spec) * back_atten) * light_int).clamp(solid_floor, 1.45)
+                as f32
         };
 
         let near_cut_plane =
