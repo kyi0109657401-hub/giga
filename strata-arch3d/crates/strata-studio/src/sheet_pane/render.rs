@@ -830,8 +830,9 @@ pub fn render_sheet_pane_egui(
                 }
             }
 
-            // 교차 흑백 블록 축척자 (`치수_축척막대`) — 「동국문화재 축척 및 방위표.ai」 실측:
-            // 바디 높이 1.17mm, 기선(베이스라인)은 바디 상단 +1.03mm. composer의 기선을 앵커로 쓴다.
+            // 단일 흑색 바디 축척자 (`치수_축척막대`) — E:\ 3차 실측 확정:
+            // 바디 [bar_len × 1.17mm] 단일 흑색 rect, 기선(베이스라인)은 바디 상단 +1.03mm.
+            // composer의 기선을 앵커로 쓴다.
             if (elem.layer_id == "치수_축척막대" || elem.layer_id == "축척자_5cm")
                 && transformed_points_mm.len() >= 2
             {
@@ -849,23 +850,12 @@ pub fn render_sheet_pane_egui(
                 let bar_w = (x1 - x0).abs().max(25.0);
                 let bar_h = (1.17 * scale).clamp(4.0, 7.5);
                 let gap_h = 1.03 * scale as f64;
-                let seg_w = bar_w / 5.0;
 
-                for i in 0..5 {
-                    let sx0 = x0.min(x1) + (i as f32) * seg_w;
-                    let seg_rect = egui::Rect::from_min_size(
-                        egui::pos2(sx0, y_bar + gap_h as f32),
-                        egui::vec2(seg_w, bar_h),
-                    );
-                    let seg_fill = if i % 2 == 0 { dim_col } else { paper };
-                    paper_painter.rect_filled(seg_rect, 0.0, seg_fill);
-                    paper_painter.rect_stroke(
-                        seg_rect,
-                        0.0,
-                        egui::Stroke::new(1.0_f32, dim_col),
-                        egui::StrokeKind::Inside,
-                    );
-                }
+                let body_rect = egui::Rect::from_min_size(
+                    egui::pos2(x0.min(x1), y_bar + gap_h as f32),
+                    egui::vec2(bar_w, bar_h),
+                );
+                paper_painter.rect_filled(body_rect, 0.0, dim_col);
                 continue;
             }
 

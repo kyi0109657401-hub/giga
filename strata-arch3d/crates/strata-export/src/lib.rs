@@ -16,9 +16,8 @@ pub use plate_composer::{
     triangulate_polygon_ear_clipping, ComposedPlate2D, PlateComposeInput, PlateLayoutMode,
     PlatePathElement, PlateRasterKind, PlateRasterRegion, PlateTextCallout,
     NORTH_ARROW_HALF_WIDTH_MM, NORTH_ARROW_HEIGHT_MM, NORTH_ARROW_INNER_Y_MM,
-    SCALE_BAR_BASELINE_GAP_MM, SCALE_BAR_BLOCK_COUNT, SCALE_BAR_HEIGHT_MM, SCALE_BAR_TICK_END_MM,
-    SCALE_BAR_TICK_MID_MM, SCALE_BAR_TICK_MINOR_MM, WOOD_GRAIN_LINE_WIDTH_MM,
-    WOOD_GRAIN_STROKE_COUNT,
+    SCALE_BAR_BASELINE_GAP_MM, SCALE_BAR_HEIGHT_MM, SCALE_BAR_TICK_END_MM, SCALE_BAR_TICK_MID_MM,
+    SCALE_BAR_TICK_MINOR_MM, WOOD_GRAIN_LINE_WIDTH_MM, WOOD_GRAIN_STROKE_COUNT,
 };
 pub use ret_exporter::{export_ret_folder_package, RetPackageManifest};
 pub use svg_illustrator::{
@@ -733,51 +732,40 @@ mod tests {
     }
 
     #[test]
-    fn test_scale_bar_renders_five_alternating_blocks_with_ticks_and_labels() {
-        // 「동국문화재 축척 및 방위표.ai」 정본: 높이 1.17mm · 흑백 교대 5블록 ·
+    fn test_scale_bar_renders_solid_black_body_with_ticks_and_labels() {
+        // E:\ 3차 실측 확정: 단일 흑색 바디 [bar_len × 1.17mm](fill #141413, 외곽선 없음) ·
         // 10등분 눈금 · 라벨 3단("0" · 절반값 · 전체값). 길이는 ScalePreset 값 유지.
         let plate = compose_sample_vessel_plate();
         let (bar_len_mm, bar_label) = strata_core::ScalePreset::Full1To1.standard_scale_bar_mm();
 
-        let blocks: Vec<_> = plate
+        let bodies: Vec<_> = plate
             .paths
             .iter()
-            .filter(|p| p.layer_id == "치수_축척블록")
+            .filter(|p| p.layer_id == "치수_축척바디")
             .collect();
-        assert_eq!(
-            blocks.len(),
-            SCALE_BAR_BLOCK_COUNT,
-            "축척 블록이 5개가 아님"
-        );
-        let mut total_w = 0.0;
-        for (i, b) in blocks.iter().enumerate() {
-            assert!(b.closed, "블록 {i}가 닫힌 사각형이 아님");
-            let xs: Vec<f64> = b.points_mm.iter().map(|p| p[0]).collect();
-            let ys: Vec<f64> = b.points_mm.iter().map(|p| p[1]).collect();
-            let w = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
-                - xs.iter().cloned().fold(f64::INFINITY, f64::min);
-            let h = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
-                - ys.iter().cloned().fold(f64::INFINITY, f64::min);
-            total_w += w;
-            assert!(
-                (w - bar_len_mm / SCALE_BAR_BLOCK_COUNT as f64).abs() < 1e-6,
-                "블록 {i} 너비 {w} ≠ {bar_len_mm}/5"
-            );
-            assert!(
-                (h - SCALE_BAR_HEIGHT_MM).abs() < 1e-9,
-                "블록 {i} 높이 {h} ≠ 1.17mm(실측 3.314pt)"
-            );
-            let expect_fill = if i % 2 == 0 { "#141413" } else { "#FFFFFF" };
-            assert_eq!(
-                b.fill_hex.as_deref(),
-                Some(expect_fill),
-                "블록 {i} 교대 채움이 아님"
-            );
-        }
+        assert_eq!(bodies.len(), 1, "축척 바디가 단일 rect 1개가 아님");
+        let body = bodies[0];
+        assert!(body.closed, "바디가 닫힌 사각형이 아님");
+        let xs: Vec<f64> = body.points_mm.iter().map(|p| p[0]).collect();
+        let ys: Vec<f64> = body.points_mm.iter().map(|p| p[1]).collect();
+        let w = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+            - xs.iter().cloned().fold(f64::INFINITY, f64::min);
+        let h = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+            - ys.iter().cloned().fold(f64::INFINITY, f64::min);
         assert!(
-            (total_w - bar_len_mm).abs() < 1e-6,
-            "블록 총너비 {total_w} ≠ 프리셋 길이 {bar_len_mm}"
+            (w - bar_len_mm).abs() < 1e-6,
+            "바디 너비 {w} ≠ 프리셋 길이 {bar_len_mm}"
         );
+        assert!(
+            (h - SCALE_BAR_HEIGHT_MM).abs() < 1e-9,
+            "바디 높이 {h} ≠ 1.17mm(실측 3.314pt)"
+        );
+        assert_eq!(
+            body.fill_hex.as_deref(),
+            Some("#141413"),
+            "바디 채움이 흑색이 아님"
+        );
+        assert_eq!(body.stroke_width_mm, 0.0, "바디에 외곽선이 있으면 안 됨");
 
         // 기선 1개 + 눈금 11개(10등분).
         let baselines: Vec<_> = plate
@@ -792,6 +780,12 @@ mod tests {
             .filter(|p| p.layer_id == "치수_축척눈금")
             .collect();
         assert_eq!(ticks.len(), 11, "10등분 눈금이 11개가 아님");
+        // 중앙 눈금 높이 = 기선 간격 + 중앙 눈금(E:\ 3차 실측 2.69mm).
+        let mid_h = ticks[5].points_mm[1][1] - ticks[5].points_mm[0][1];
+        assert!(
+            (mid_h - (SCALE_BAR_BASELINE_GAP_MM + SCALE_BAR_TICK_MID_MM)).abs() < 1e-9,
+            "중앙 눈금 높이 {mid_h} ≠ 1.03 + 2.69"
+        );
 
         // 라벨 3단.
         let labels: Vec<_> = plate

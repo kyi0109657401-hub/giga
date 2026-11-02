@@ -930,12 +930,12 @@ pub fn append_artifact_label_block(plate: &mut ComposedPlate2D, number: &str, ca
 pub const SCALE_BAR_HEIGHT_MM: f64 = 1.17;
 /// 축척 막대 기선(베이스라인)이 바디 상단에서 떨어진 간격 (mm) — 실측 2.906pt = 1.03mm.
 pub const SCALE_BAR_BASELINE_GAP_MM: f64 = 1.03;
-/// 축척 막대 10등분 눈금 높이 (mm, 기선 기준 상방) — 실측 민눈금 3.315pt / 양끝 6.764pt / 중앙 7.532pt.
+/// 축척 막대 10등분 눈금 높이 (mm, 기선 기준 상방) — E:\ 3차 실측 확정.
+/// 민눈금 1.17mm · 양끝 2.39mm · 중앙 2.69mm.
+/// (구 주석의 "민눈금 3.315pt"는 오기 — 3.315pt는 바디 높이 1.17mm이다.)
 pub const SCALE_BAR_TICK_MINOR_MM: f64 = 1.17;
 pub const SCALE_BAR_TICK_END_MM: f64 = 2.39;
-pub const SCALE_BAR_TICK_MID_MM: f64 = 2.66;
-/// 축척 막대 교대 블록 분할 수 — SheetPane 미리보기("교차 흑백 블록 축척자")와 동일하게 5분할.
-pub const SCALE_BAR_BLOCK_COUNT: usize = 5;
+pub const SCALE_BAR_TICK_MID_MM: f64 = 2.69;
 /// 방위표(북화살) 연꼴 밑변 반폭·높이·중앙 꺾임점 (mm) — 「동국문화재 축척 및 방위표.ai」 실측
 /// (밑변 11.34pt = 4.0mm, 높이 22.2pt = 7.83mm, 꺾임 3.93pt = 1.39mm).
 pub const NORTH_ARROW_HALF_WIDTH_MM: f64 = 2.0;
@@ -1953,10 +1953,10 @@ fn compose_archaeological_plate_inner(
         });
     }
 
-    // 5. 실측 축척 막대 — 「동국문화재 축척 및 방위표.ai」 정본.
-    //    샘플 원본은 통짜 검정 바디이나, 흑백 교대 블록 제도 지시 + SheetPane 미리보기
-    //    ("교차 흑백 블록 축척자", 5분할) 관례에 따라 흑백 교대 5블록으로 제도한다.
-    //    치수 출처: 바디 높이 1.17mm · 기선 +1.03mm · 눈금(민 1.17 / 양끝 2.39 / 중앙 2.66mm) ·
+    // 5. 실측 축척 막대 — 「동국문화재 축척 및 방위표.ai」 정본 (E:\ 3차 실측 확정).
+    //    바디: 단일 흑색 rect [bar_x0, bar_y, bar_len × 높이 1.17mm], fill #141413, 외곽선 없음.
+    //    치수 출처: 바디 높이 1.17mm(실측 3.314pt) · 기선 +1.03mm ·
+    //    눈금(민 1.17 / 양끝 2.39 / 중앙 2.69mm, 기선 기준 상방) ·
     //    라벨 3단("0" · 절반값 · "전체값(축척)"). 막대 길이는 ScalePreset 값 유지.
     let default_scale = ScalePreset::Full1To1;
     let (bar_len_mm, bar_label) = default_scale.standard_scale_bar_mm();
@@ -1964,25 +1964,20 @@ fn compose_archaeological_plate_inner(
     let bar_y = (base_y - 7.5).max(8.0);
     let bar_top = bar_y + SCALE_BAR_HEIGHT_MM;
     let baseline_y = bar_top + SCALE_BAR_BASELINE_GAP_MM;
-    let block_w = bar_len_mm / SCALE_BAR_BLOCK_COUNT as f64;
-    for i in 0..SCALE_BAR_BLOCK_COUNT {
-        let bx0 = bar_x0 + block_w * i as f64;
-        let is_black = i % 2 == 0;
-        paths.push(PlatePathElement {
-            layer_id: String::from("치수_축척블록"),
-            points_mm: vec![
-                [bx0, bar_y],
-                [bx0 + block_w, bar_y],
-                [bx0 + block_w, bar_top],
-                [bx0, bar_top],
-            ],
-            closed: true,
-            stroke_hex: String::from("#141413"),
-            stroke_width_mm: 0.15,
-            dash_pattern_mm: None,
-            fill_hex: Some(String::from(if is_black { "#141413" } else { "#FFFFFF" })),
-        });
-    }
+    paths.push(PlatePathElement {
+        layer_id: String::from("치수_축척바디"),
+        points_mm: vec![
+            [bar_x0, bar_y],
+            [bar_x0 + bar_len_mm, bar_y],
+            [bar_x0 + bar_len_mm, bar_top],
+            [bar_x0, bar_top],
+        ],
+        closed: true,
+        stroke_hex: String::from("#141413"),
+        stroke_width_mm: 0.0,
+        dash_pattern_mm: None,
+        fill_hex: Some(String::from("#141413")),
+    });
     // 기선(베이스라인) — SheetPane 미리보기 특수분기가 이 선(layer "치수_축척막대")을 앵커로 쓴다.
     paths.push(PlatePathElement {
         layer_id: String::from("치수_축척막대"),
@@ -2038,7 +2033,7 @@ fn compose_archaeological_plate_inner(
         color_hex: String::from("#141413"),
     });
 
-    // 6. 방위표(북화살) — 「동국문화재 축척 및 방위표.ai」 정본.
+    // 6. 방위표(북화살) — 「동국문화재 축척 및 방위표.ai」 정본 (E:\ 3차 실측 대조로 확정).
     //    밑변 4.0mm × 높이 7.83mm 연꼴(좌백·우흑 반분) + 상단 벡터 "N"(1.46×1.86mm).
     //    배치 규칙: 도판 우상단 여백 고정 (우단·상단에서 margin 만큼).
     {
