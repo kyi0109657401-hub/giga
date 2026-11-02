@@ -238,10 +238,21 @@ mod tests {
             "AMD discrete GPU must strongly outscore integrated GPU"
         );
 
+        // 하드웨어 탐색은 실행 환경에 의존한다. CI 헤드리스 러너에는 GPU 어댑터가 없을 수 있으므로
+        // 탐색 결과는 CI에서 강제하지 않고, 점수 계산 계약(위 두 단정)만 항상 검증한다.
         let gpus = discover_hardware_gpus();
-        assert!(
-            !gpus.is_empty(),
-            "must detect at least one GPU adapter on this machine"
-        );
+        if std::env::var("CI").is_ok() {
+            for g in &gpus {
+                assert!(
+                    g.priority_score > 0,
+                    "발견된 어댑터의 우선순위 점수는 양수여야 함"
+                );
+            }
+        } else {
+            assert!(
+                !gpus.is_empty(),
+                "must detect at least one GPU adapter on this machine"
+            );
+        }
     }
 }

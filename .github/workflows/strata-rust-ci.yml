@@ -90,4 +90,5 @@ jobs:
         with:
           name: strata-arch3d-rust-verification
           retention-days: 14
+          if-no-files-found: ignore
           path: strata-arch3d/target/ci-shots/*
