@@ -12,9 +12,13 @@ pub use pdf_tiled_print::{
 };
 pub use plate_composer::{
     append_artifact_label_block, append_section_hatching, compose_archaeological_plate,
-    compose_archaeological_plate_with_mode, hatch_polygon_45, triangulate_polygon_ear_clipping,
-    ComposedPlate2D, PlateComposeInput, PlateLayoutMode, PlatePathElement, PlateRasterKind,
-    PlateRasterRegion, PlateTextCallout,
+    compose_archaeological_plate_with_mode, hatch_polygon_45, scale_bar_mid_label,
+    triangulate_polygon_ear_clipping, ComposedPlate2D, PlateComposeInput, PlateLayoutMode,
+    PlatePathElement, PlateRasterKind, PlateRasterRegion, PlateTextCallout,
+    NORTH_ARROW_HALF_WIDTH_MM, NORTH_ARROW_HEIGHT_MM, NORTH_ARROW_INNER_Y_MM,
+    SCALE_BAR_BASELINE_GAP_MM, SCALE_BAR_BLOCK_COUNT, SCALE_BAR_HEIGHT_MM, SCALE_BAR_TICK_END_MM,
+    SCALE_BAR_TICK_MID_MM, SCALE_BAR_TICK_MINOR_MM, WOOD_GRAIN_LINE_WIDTH_MM,
+    WOOD_GRAIN_STROKE_COUNT,
 };
 pub use ret_exporter::{export_ret_folder_package, RetPackageManifest};
 pub use svg_illustrator::{
@@ -686,6 +690,228 @@ mod tests {
                     .iter()
                     .any(|r| r.kind == PlateRasterKind::BackInteriorRubbing),
             "3-column sherd plate must include both exterior and interior rubbing raster regions"
+        );
+    }
+
+    #[test]
+    fn test_scale_bar_mid_label_follows_field_sample_halves() {
+        // 샘플 실측: "20cm(1/6)" 막대 중간 라벨 "10" — 전체값의 절반을 단위 없이 표기.
+        assert_eq!(scale_bar_mid_label(5.0), "2.5");
+        assert_eq!(scale_bar_mid_label(10.0), "5");
+        assert_eq!(scale_bar_mid_label(50.0), "2.5");
+        assert_eq!(scale_bar_mid_label(100.0), "5");
+        assert_eq!(scale_bar_mid_label(200.0), "10");
+        assert_eq!(scale_bar_mid_label(400.0), "20");
+    }
+
+    fn compose_sample_vessel_plate() -> ComposedPlate2D {
+        let mesh = sample_vessel_mesh();
+        let m = compute_artifact_measurements(&mesh, ArtifactCategory::CompleteVessel);
+        let vsec = slice_mesh_with_fixed_plane(
+            &mesh,
+            None,
+            CutPlaneOrientation::VerticalLongitudinal,
+            0.0,
+            0.0,
+            0.25,
+        );
+        compose_archaeological_plate(&PlateComposeInput {
+            title: "축척막대 검증용 완형",
+            measurements: &m,
+            vertical_section: &vsec,
+            horizontal_sections: &[],
+            occluded_spans: &[],
+            sherd_subtype: None,
+            sherd_strategy: None,
+            handle_attachment: None,
+            bead_subtype: None,
+            bead_drill_type: None,
+            wado_cut_ratio: None,
+            hemp_density_label: None,
+            flip_exterior_right: false,
+        })
+    }
+
+    #[test]
+    fn test_scale_bar_renders_five_alternating_blocks_with_ticks_and_labels() {
+        // 「동국문화재 축척 및 방위표.ai」 정본: 높이 1.17mm · 흑백 교대 5블록 ·
+        // 10등분 눈금 · 라벨 3단("0" · 절반값 · 전체값). 길이는 ScalePreset 값 유지.
+        let plate = compose_sample_vessel_plate();
+        let (bar_len_mm, bar_label) = strata_core::ScalePreset::Full1To1.standard_scale_bar_mm();
+
+        let blocks: Vec<_> = plate
+            .paths
+            .iter()
+            .filter(|p| p.layer_id == "치수_축척블록")
+            .collect();
+        assert_eq!(
+            blocks.len(),
+            SCALE_BAR_BLOCK_COUNT,
+            "축척 블록이 5개가 아님"
+        );
+        let mut total_w = 0.0;
+        for (i, b) in blocks.iter().enumerate() {
+            assert!(b.closed, "블록 {i}가 닫힌 사각형이 아님");
+            let xs: Vec<f64> = b.points_mm.iter().map(|p| p[0]).collect();
+            let ys: Vec<f64> = b.points_mm.iter().map(|p| p[1]).collect();
+            let w = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+                - xs.iter().cloned().fold(f64::INFINITY, f64::min);
+            let h = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+                - ys.iter().cloned().fold(f64::INFINITY, f64::min);
+            total_w += w;
+            assert!(
+                (w - bar_len_mm / SCALE_BAR_BLOCK_COUNT as f64).abs() < 1e-6,
+                "블록 {i} 너비 {w} ≠ {bar_len_mm}/5"
+            );
+            assert!(
+                (h - SCALE_BAR_HEIGHT_MM).abs() < 1e-9,
+                "블록 {i} 높이 {h} ≠ 1.17mm(실측 3.314pt)"
+            );
+            let expect_fill = if i % 2 == 0 { "#141413" } else { "#FFFFFF" };
+            assert_eq!(
+                b.fill_hex.as_deref(),
+                Some(expect_fill),
+                "블록 {i} 교대 채움이 아님"
+            );
+        }
+        assert!(
+            (total_w - bar_len_mm).abs() < 1e-6,
+            "블록 총너비 {total_w} ≠ 프리셋 길이 {bar_len_mm}"
+        );
+
+        // 기선 1개 + 눈금 11개(10등분).
+        let baselines: Vec<_> = plate
+            .paths
+            .iter()
+            .filter(|p| p.layer_id == "치수_축척막대" && !p.closed)
+            .collect();
+        assert_eq!(baselines.len(), 1, "기선이 1개가 아님");
+        let ticks: Vec<_> = plate
+            .paths
+            .iter()
+            .filter(|p| p.layer_id == "치수_축척눈금")
+            .collect();
+        assert_eq!(ticks.len(), 11, "10등분 눈금이 11개가 아님");
+
+        // 라벨 3단.
+        let labels: Vec<_> = plate
+            .callouts
+            .iter()
+            .filter(|c| c.layer_id == "치수_축척라벨")
+            .collect();
+        assert_eq!(labels.len(), 3, "축척 라벨이 3단이 아님");
+        let texts: Vec<&str> = labels.iter().map(|c| c.text.as_str()).collect();
+        assert!(texts.contains(&"0"), "좌측 0 라벨 없음: {texts:?}");
+        assert!(
+            texts.contains(&scale_bar_mid_label(bar_len_mm).as_str()),
+            "중앙 절반값 라벨 없음: {texts:?}"
+        );
+        assert!(
+            texts.contains(&bar_label),
+            "우측 전체값 라벨 없음: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn test_north_arrow_has_split_blades_and_vector_n_at_top_right() {
+        // 방위표 정본: 좌백·우흑 반분 연꽃(밑변 4.0 × 높이 7.83mm) + 벡터 "N", 우상단 배치.
+        let plate = compose_sample_vessel_plate();
+        let blades: Vec<_> = plate
+            .paths
+            .iter()
+            .filter(|p| p.layer_id == "방위_북화살")
+            .collect();
+        assert_eq!(blades.len(), 3, "북화살 요소가 3개(좌날·우날·N)가 아님");
+        assert_eq!(
+            blades[0].fill_hex.as_deref(),
+            Some("#FFFFFF"),
+            "좌날이 백색이 아님"
+        );
+        assert_eq!(
+            blades[1].fill_hex.as_deref(),
+            Some("#141413"),
+            "우날이 흑색이 아님"
+        );
+        assert_eq!(
+            blades[2].fill_hex.as_deref(),
+            Some("#141413"),
+            "N이 흑색이 아님"
+        );
+        for b in &blades {
+            assert!(b.closed, "북화살 요소가 닫힌 다각형이 아님");
+        }
+        // 우상단 여백 배치 확인.
+        let max_x = blades
+            .iter()
+            .flat_map(|b| b.points_mm.iter().map(|p| p[0]))
+            .fold(f64::NEG_INFINITY, f64::max);
+        let max_y = blades
+            .iter()
+            .flat_map(|b| b.points_mm.iter().map(|p| p[1]))
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            max_x > plate.canvas_width_mm - 30.0,
+            "북화살이 우상단에 있지 않음: max_x={max_x}"
+        );
+        assert!(
+            max_y > plate.canvas_height_mm - 30.0,
+            "북화살이 우상단에 있지 않음: max_y={max_y}"
+        );
+    }
+
+    #[test]
+    fn test_corroded_metal_plate_draws_wood_grain_strokes() {
+        // 목질흔.ai 정본: 0.15mm 수평 결선 16획 (부식 금속기에만).
+        let mesh = sample_vessel_mesh();
+        let m = compute_artifact_measurements(&mesh, ArtifactCategory::CorrodedMetal);
+        let vsec = slice_mesh_with_fixed_plane(
+            &mesh,
+            None,
+            CutPlaneOrientation::VerticalLongitudinal,
+            0.0,
+            0.0,
+            0.25,
+        );
+        let plate = compose_archaeological_plate_with_mode(
+            &PlateComposeInput {
+                title: "부식 철촉",
+                measurements: &m,
+                vertical_section: &vsec,
+                horizontal_sections: &[],
+                occluded_spans: &[],
+                sherd_subtype: None,
+                sherd_strategy: None,
+                handle_attachment: None,
+                bead_subtype: None,
+                bead_drill_type: None,
+                wado_cut_ratio: None,
+                hemp_density_label: None,
+                flip_exterior_right: false,
+            },
+            PlateLayoutMode::LithicAndCorrodedMetalPlate,
+        );
+        let grains: Vec<_> = plate
+            .paths
+            .iter()
+            .filter(|p| p.layer_id == "목질흔_결선")
+            .collect();
+        assert_eq!(
+            grains.len(),
+            WOOD_GRAIN_STROKE_COUNT,
+            "목질흔 결선이 16획이 아님"
+        );
+        for g in &grains {
+            assert!(
+                (g.stroke_width_mm - WOOD_GRAIN_LINE_WIDTH_MM).abs() < 1e-9,
+                "결선 굵기가 0.15mm가 아님"
+            );
+            assert_eq!(g.points_mm.len(), 2, "결선이 수평 2점 선분이 아님");
+        }
+        // 완형 토기 도판에는 결선이 없어야 한다.
+        let vessel = compose_sample_vessel_plate();
+        assert!(
+            vessel.paths.iter().all(|p| p.layer_id != "목질흔_결선"),
+            "비금속 도판에 목질흔 결선이 있음"
         );
     }
 }

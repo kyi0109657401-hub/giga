@@ -926,6 +926,38 @@ pub fn append_artifact_label_block(plate: &mut ComposedPlate2D, number: &str, ca
 }
 
 /// 실측치(`ArtifactMeasurementReport`)와 단면 윤곽(`PlaneSliceResult`)으로부터 8대 유물군 맞춤형 2D 도판을 합성한다.
+/// 실측 축척 막대 바디 높이 (mm) — 「동국문화재 축척 및 방위표.ai」 실측 3.314pt = 1.17mm.
+pub const SCALE_BAR_HEIGHT_MM: f64 = 1.17;
+/// 축척 막대 기선(베이스라인)이 바디 상단에서 떨어진 간격 (mm) — 실측 2.906pt = 1.03mm.
+pub const SCALE_BAR_BASELINE_GAP_MM: f64 = 1.03;
+/// 축척 막대 10등분 눈금 높이 (mm, 기선 기준 상방) — 실측 민눈금 3.315pt / 양끝 6.764pt / 중앙 7.532pt.
+pub const SCALE_BAR_TICK_MINOR_MM: f64 = 1.17;
+pub const SCALE_BAR_TICK_END_MM: f64 = 2.39;
+pub const SCALE_BAR_TICK_MID_MM: f64 = 2.66;
+/// 축척 막대 교대 블록 분할 수 — SheetPane 미리보기("교차 흑백 블록 축척자")와 동일하게 5분할.
+pub const SCALE_BAR_BLOCK_COUNT: usize = 5;
+/// 방위표(북화살) 연꼴 밑변 반폭·높이·중앙 꺾임점 (mm) — 「동국문화재 축척 및 방위표.ai」 실측
+/// (밑변 11.34pt = 4.0mm, 높이 22.2pt = 7.83mm, 꺾임 3.93pt = 1.39mm).
+pub const NORTH_ARROW_HALF_WIDTH_MM: f64 = 2.0;
+pub const NORTH_ARROW_HEIGHT_MM: f64 = 7.83;
+pub const NORTH_ARROW_INNER_Y_MM: f64 = 1.39;
+/// 목질흔 나뭇결 세선 굵기 (mm) — 「목질흔.ai」 실측 0.15 (STANDARD_LINE_WEIGHTS_MM 규격값).
+pub const WOOD_GRAIN_LINE_WIDTH_MM: f64 = 0.15;
+/// 목질흔 결선 획수 — 「목질흔.ai」 실측 띠(수평 결선 2개 밴드) 재현용.
+pub const WOOD_GRAIN_STROKE_COUNT: usize = 16;
+
+/// 축척 막대 중간 라벨(절반값, 단위 없음) — 샘플 표기("20cm(1/6)" 막대의 "10")와 같은 규칙.
+/// 막대 길이 50mm 이상이면 cm 단위, 그 미만이면 mm 단위로 절반값을 표기한다.
+pub fn scale_bar_mid_label(bar_len_mm: f64) -> String {
+    let half = if bar_len_mm >= 50.0 {
+        bar_len_mm / 20.0
+    } else {
+        bar_len_mm / 2.0
+    };
+    let s = format!("{half:.1}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 pub fn compose_archaeological_plate(input: &PlateComposeInput<'_>) -> ComposedPlate2D {
     compose_archaeological_plate_inner(input, None)
 }
@@ -1718,6 +1750,24 @@ fn compose_archaeological_plate_inner(
                         fill_hex: None,
                     });
                 }
+                // 목질흔.ai 정본: 슴베·자루 하단 띠(`tang_wood_grain_z_ratio` = 하단 32%)에
+                // 수평 나뭇결 세선(0.15mm) 16획. 실측 결선 길이 2~51mm를 결정적 분포로 재현한다.
+                let tang_h = height * 0.32;
+                for i in 0..WOOD_GRAIN_STROKE_COUNT {
+                    let gy =
+                        base_y + 2.0 + tang_h * (i as f64 + 0.5) / WOOD_GRAIN_STROKE_COUNT as f64;
+                    let glen = 6.0 + ((i * 37 + 11) % 34) as f64;
+                    let gx0 = cx - glen * 0.5 + ((i * 53 + 7) % 9) as f64 * 0.3 - 1.2;
+                    paths.push(PlatePathElement {
+                        layer_id: String::from("목질흔_결선"),
+                        points_mm: vec![[gx0, gy], [gx0 + glen, gy]],
+                        closed: false,
+                        stroke_hex: String::from("#141413"),
+                        stroke_width_mm: WOOD_GRAIN_LINE_WIDTH_MM,
+                        dash_pattern_mm: None,
+                        fill_hex: None,
+                    });
+                }
             }
         }
     }
@@ -1903,29 +1953,141 @@ fn compose_archaeological_plate_inner(
         });
     }
 
-    // 5. 동적 실측 치수선 및 축척 막대(`Scale Bar`) — 기본 축척 1:1(`ScalePreset::Full1To1`)
+    // 5. 실측 축척 막대 — 「동국문화재 축척 및 방위표.ai」 정본.
+    //    샘플 원본은 통짜 검정 바디이나, 흑백 교대 블록 제도 지시 + SheetPane 미리보기
+    //    ("교차 흑백 블록 축척자", 5분할) 관례에 따라 흑백 교대 5블록으로 제도한다.
+    //    치수 출처: 바디 높이 1.17mm · 기선 +1.03mm · 눈금(민 1.17 / 양끝 2.39 / 중앙 2.66mm) ·
+    //    라벨 3단("0" · 절반값 · "전체값(축척)"). 막대 길이는 ScalePreset 값 유지.
     let default_scale = ScalePreset::Full1To1;
     let (bar_len_mm, bar_label) = default_scale.standard_scale_bar_mm();
     let bar_x0 = cx - bar_len_mm * 0.5;
     let bar_y = (base_y - 7.5).max(8.0);
+    let bar_top = bar_y + SCALE_BAR_HEIGHT_MM;
+    let baseline_y = bar_top + SCALE_BAR_BASELINE_GAP_MM;
+    let block_w = bar_len_mm / SCALE_BAR_BLOCK_COUNT as f64;
+    for i in 0..SCALE_BAR_BLOCK_COUNT {
+        let bx0 = bar_x0 + block_w * i as f64;
+        let is_black = i % 2 == 0;
+        paths.push(PlatePathElement {
+            layer_id: String::from("치수_축척블록"),
+            points_mm: vec![
+                [bx0, bar_y],
+                [bx0 + block_w, bar_y],
+                [bx0 + block_w, bar_top],
+                [bx0, bar_top],
+            ],
+            closed: true,
+            stroke_hex: String::from("#141413"),
+            stroke_width_mm: 0.15,
+            dash_pattern_mm: None,
+            fill_hex: Some(String::from(if is_black { "#141413" } else { "#FFFFFF" })),
+        });
+    }
+    // 기선(베이스라인) — SheetPane 미리보기 특수분기가 이 선(layer "치수_축척막대")을 앵커로 쓴다.
     paths.push(PlatePathElement {
         layer_id: String::from("치수_축척막대"),
-        points_mm: vec![[bar_x0, bar_y], [bar_x0 + bar_len_mm, bar_y]],
+        points_mm: vec![[bar_x0, baseline_y], [bar_x0 + bar_len_mm, baseline_y]],
         closed: false,
         stroke_hex: String::from("#141413"),
-        stroke_width_mm: 0.40,
+        stroke_width_mm: 0.20,
         dash_pattern_mm: None,
         fill_hex: None,
     });
-
-    let scale_label = bar_label.to_string();
+    // 10등분 눈금 (바디 상단에서 기선 위 정점까지).
+    for d in 0..=10 {
+        let tx = bar_x0 + bar_len_mm * d as f64 / 10.0;
+        let tick_h = if d == 5 {
+            SCALE_BAR_TICK_MID_MM
+        } else if d == 0 || d == 10 {
+            SCALE_BAR_TICK_END_MM
+        } else {
+            SCALE_BAR_TICK_MINOR_MM
+        };
+        paths.push(PlatePathElement {
+            layer_id: String::from("치수_축척눈금"),
+            points_mm: vec![[tx, bar_top], [tx, baseline_y + tick_h]],
+            closed: false,
+            stroke_hex: String::from("#141413"),
+            stroke_width_mm: 0.18,
+            dash_pattern_mm: None,
+            fill_hex: None,
+        });
+    }
+    // 라벨 3단 — 좌 "0", 중앙 절반값, 우 전체값(축척).
+    let mid_label = scale_bar_mid_label(bar_len_mm);
+    let label_y = baseline_y + SCALE_BAR_TICK_MID_MM + 2.4;
     callouts.push(PlateTextCallout {
         layer_id: String::from("치수_축척라벨"),
-        pos_mm: [cx - 12.0, bar_y - 4.0],
-        text: scale_label,
-        font_size_pt: 8.5,
+        pos_mm: [bar_x0 - 1.0, label_y],
+        text: String::from("0"),
+        font_size_pt: 8.0,
         color_hex: String::from("#141413"),
     });
+    callouts.push(PlateTextCallout {
+        layer_id: String::from("치수_축척라벨"),
+        pos_mm: [cx - mid_label.len() as f64 * 0.9, label_y],
+        text: mid_label,
+        font_size_pt: 8.0,
+        color_hex: String::from("#141413"),
+    });
+    callouts.push(PlateTextCallout {
+        layer_id: String::from("치수_축척라벨"),
+        pos_mm: [bar_x0 + bar_len_mm - 2.0, label_y],
+        text: bar_label.to_string(),
+        font_size_pt: 8.0,
+        color_hex: String::from("#141413"),
+    });
+
+    // 6. 방위표(북화살) — 「동국문화재 축척 및 방위표.ai」 정본.
+    //    밑변 4.0mm × 높이 7.83mm 연꼴(좌백·우흑 반분) + 상단 벡터 "N"(1.46×1.86mm).
+    //    배치 규칙: 도판 우상단 여백 고정 (우단·상단에서 margin 만큼).
+    {
+        let anx = canvas_width_mm - margin - 2.5;
+        let an_y0 = canvas_height_mm - margin - 10.6;
+        let apex = [anx, an_y0 + NORTH_ARROW_HEIGHT_MM];
+        let inner = [anx, an_y0 + NORTH_ARROW_INNER_Y_MM];
+        paths.push(PlatePathElement {
+            layer_id: String::from("방위_북화살"),
+            points_mm: vec![[anx - NORTH_ARROW_HALF_WIDTH_MM, an_y0], apex, inner],
+            closed: true,
+            stroke_hex: String::from("#141413"),
+            stroke_width_mm: 0.11,
+            dash_pattern_mm: None,
+            fill_hex: Some(String::from("#FFFFFF")),
+        });
+        paths.push(PlatePathElement {
+            layer_id: String::from("방위_북화살"),
+            points_mm: vec![[anx + NORTH_ARROW_HALF_WIDTH_MM, an_y0], apex, inner],
+            closed: true,
+            stroke_hex: String::from("#141413"),
+            stroke_width_mm: 0.11,
+            dash_pattern_mm: None,
+            fill_hex: Some(String::from("#141413")),
+        });
+        // 벡터 "N" — 샘플 외곽 좌표(폭 1.46mm × 높이 1.86mm)를 mm로 전사, 중심 정렬.
+        let n_rel: [[f64; 2]; 9] = [
+            [-0.399, 0.536],
+            [-0.404, 1.860],
+            [-0.730, 1.860],
+            [-0.730, 0.0],
+            [-0.342, 0.0],
+            [0.406, 1.324],
+            [0.406, 0.0],
+            [0.730, 0.0],
+            [0.730, 1.860],
+        ];
+        let n_y0 = an_y0 + NORTH_ARROW_HEIGHT_MM + 0.6;
+        let n_pts: Vec<[f64; 2]> = n_rel.iter().map(|p| [anx + p[0], n_y0 + p[1]]).collect();
+        paths.push(PlatePathElement {
+            layer_id: String::from("방위_북화살"),
+            points_mm: n_pts,
+            closed: true,
+            stroke_hex: String::from("#141413"),
+            stroke_width_mm: 0.06,
+            dash_pattern_mm: None,
+            fill_hex: Some(String::from("#141413")),
+        });
+    }
 
     callouts.push(PlateTextCallout {
         layer_id: String::from("치수_축척막대"),
