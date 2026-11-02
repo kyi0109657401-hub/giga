@@ -250,6 +250,29 @@ pub fn render_topdown_concentric_plan_rgba(
     img
 }
 
+/// X-Ray 투명 혼합용 뒤→앞 삼각형 순서 (B7 고정점).
+///
+/// X-Ray는 z버퍼를 쓰지 않고 그때그때 덧씌우므로, 메쉬 저장 순서대로 그리면
+/// 뒷면이 앞면을 덮어 뷰·메쉬 순서에 따라 결과가 달라진다.
+/// 월드 z 내림차순(뒤→앞)으로 정렬하면 덧셈 순서가 고정되어 결정적·올바른 투시가 된다.
+/// 동률은 원래 순서를 유지한다(안정 정렬).
+pub(crate) fn xray_back_to_front_order(mesh: &TriMesh, world: &[[f64; 3]]) -> Vec<usize> {
+    debug_assert_eq!(world.len(), mesh.positions.len());
+    let mut order: Vec<usize> = (0..mesh.triangles.len()).collect();
+    order.sort_by(|&a, &b| {
+        let za = mesh.triangles[a]
+            .iter()
+            .map(|&vi| world[vi as usize][2])
+            .sum::<f64>();
+        let zb = mesh.triangles[b]
+            .iter()
+            .map(|&vi| world[vi as usize][2])
+            .sum::<f64>();
+        zb.partial_cmp(&za).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    order
+}
+
 /// 하단 3D 정면 입면 뷰를 전체 배경 방안선(`Image 6`) + `Rayon` 병렬 정점 투영 + `tri_stride = 1` 원본 스캐너 해상도(`Image 9`)로 렌더링한다.
 pub fn render_mesh_zbuffer_rgba(
     mesh: &TriMesh,
@@ -332,8 +355,21 @@ pub fn render_mesh_zbuffer_rgba(
     let light_int = f64::from(state.light_intensity.clamp(0.4, 1.8));
     let edge_pad = -1.5e-3;
 
+    // B7 고정점: X-Ray는 z버퍼 없이 덧씌우므로 뒤→앞 순서로 그려야 한다.
+    // 다른 모드는 z버퍼가 순서를 바로잡으므로 메쉬 순서를 유지한다(0ms).
+    let xray_order: Option<Vec<usize>> = if active_mode == View3DShaderMode::XRayInner {
+        let worlds: Vec<[f64; 3]> = transformed_verts.iter().map(|&(w, _)| w).collect();
+        Some(xray_back_to_front_order(mesh, &worlds))
+    } else {
+        None
+    };
+    let tri_iter: Vec<(usize, &[u32; 3])> = match &xray_order {
+        Some(order) => order.iter().map(|&t| (t, &mesh.triangles[t])).collect(),
+        None => mesh.triangles.iter().enumerate().collect(),
+    };
+
     // Image 9: tri_stride = 1 (100% 전체 삼각형 렌더링, 점/핀홀 0개 보장!)
-    for (t_idx, tri) in mesh.triangles.iter().enumerate() {
+    for (t_idx, tri) in tri_iter {
         let i0 = tri[0] as usize;
         let i1 = tri[1] as usize;
         let i2 = tri[2] as usize;

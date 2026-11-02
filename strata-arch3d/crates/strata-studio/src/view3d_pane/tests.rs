@@ -642,3 +642,41 @@ fn test_viewport_grid_has_no_red_in_either_theme() {
         );
     }
 }
+
+#[test]
+fn test_xray_renders_back_to_front_deterministically() {
+    // B7: X-Ray는 z버퍼 없이 덧씌우므로 뒤→앞 순서가 고정되어야 한다.
+    // 메쉬 저장 순서와 무관하게 같은 그림이 나와야 한다.
+    let mesh = make_test_bowl_mesh();
+    let n = mesh.positions.len();
+    let mut world = vec![[0.0f64; 3]; n];
+    // 0번 삼각형(정점 0, 1, stride+1 = 0, 1, 38)을 가장 멀리 둔다.
+    world[0] = [0.0, 0.0, 100.0];
+    world[1] = [1.0, 0.0, 100.0];
+    world[38] = [0.0, 1.0, 100.0];
+    let order = xray_back_to_front_order(&mesh, &world);
+    assert_eq!(
+        order.len(),
+        mesh.triangles.len(),
+        "전 삼각형이 순서에 있어야 함"
+    );
+    assert_eq!(order[0], 0, "가장 먼 삼각형이 먼저 그려져야 함");
+    let mut sorted = order.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        sorted,
+        (0..mesh.triangles.len()).collect::<Vec<_>>(),
+        "순서는 삼각형 인덱스의 순열이어야 함"
+    );
+    // 같은 입력은 항상 같은 순서 (결정적).
+    assert_eq!(order, xray_back_to_front_order(&mesh, &world));
+
+    // 실제 X-Ray 렌더도 두 번 하면 바이트 동일해야 한다.
+    let state = View3DPaneState {
+        shader_mode: View3DShaderMode::XRayInner,
+        ..Default::default()
+    };
+    let a = render_mesh_zbuffer_rgba(&mesh, None, &state, 160, 160);
+    let b = render_mesh_zbuffer_rgba(&mesh, None, &state, 160, 160);
+    assert_eq!(a.as_raw(), b.as_raw(), "X-Ray 렌더가 비결정적이면 안 됨");
+}
