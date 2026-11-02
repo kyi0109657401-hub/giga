@@ -1,5 +1,7 @@
 use crate::layout_r1::R1FiveTierGeometry;
-use crate::sheet_pane::render_full_workspace_offscreen_png;
+use crate::sheet_pane::{
+    render_full_workspace_offscreen_png, render_full_workspace_offscreen_png_dark,
+};
 use crate::splash::SplashState;
 use std::fmt::Write as _;
 use std::fs;
@@ -486,6 +488,26 @@ pub fn generate_screenshot_tour_and_golden_outputs(
             message: e.to_string(),
         })?;
     written.push(p7_path.display().to_string());
+
+    // 8. 08_theme_light_sheet_1440x900.png — 다크 모드 대조용 라이트 기준 캡처.
+    let p8_path = dir.join("08_theme_light_sheet_1440x900.png");
+    render_full_workspace_offscreen_png(&plate_vessel, &vessel_mesh, false, false)
+        .save(&p8_path)
+        .map_err(|e| StrataError::Io {
+            path: p8_path.display().to_string(),
+            message: e.to_string(),
+        })?;
+    written.push(p8_path.display().to_string());
+
+    // 9. 09_theme_dark_sheet_1440x900.png — 화면 크롬만 다크, 실측 도판은 라이트와 동일 색.
+    let p9_path = dir.join("09_theme_dark_sheet_1440x900.png");
+    render_full_workspace_offscreen_png_dark(&plate_vessel, &vessel_mesh, false, false)
+        .save(&p9_path)
+        .map_err(|e| StrataError::Io {
+            path: p9_path.display().to_string(),
+            message: e.to_string(),
+        })?;
+    written.push(p9_path.display().to_string());
 
     // 8. Golden ret/ package + PDF + DXF + CSV + Markdown + V1~V8 Report
     let ret_manifest = export_ret_folder_package(

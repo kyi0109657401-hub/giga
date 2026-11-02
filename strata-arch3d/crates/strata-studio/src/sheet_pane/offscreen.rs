@@ -39,13 +39,50 @@ pub fn render_full_workspace_offscreen_png(
     sheet_full_tab_mode: bool,
     with_dialog_overlay: bool,
 ) -> RgbaImage {
+    render_full_workspace_offscreen_png_inner(
+        plate,
+        mesh,
+        sheet_full_tab_mode,
+        with_dialog_overlay,
+        false,
+    )
+}
+
+/// 다크 모드 투어 캡처용 변형.
+///
+/// 화면 크롬(바탕·바·작업대)만 다크 팔레트로 그리고, 실측 도판 내용물(용지·제도선·탁본)은
+/// 라이트와 동일한 색으로 그린다 — 출력물 색상 불변 철칙. 용지가 보이도록 흰 종이 rect를 깐다.
+pub fn render_full_workspace_offscreen_png_dark(
+    plate: &ComposedPlate2D,
+    mesh: &strata_core::TriMesh,
+    sheet_full_tab_mode: bool,
+    with_dialog_overlay: bool,
+) -> RgbaImage {
+    render_full_workspace_offscreen_png_inner(
+        plate,
+        mesh,
+        sheet_full_tab_mode,
+        with_dialog_overlay,
+        true,
+    )
+}
+
+fn render_full_workspace_offscreen_png_inner(
+    plate: &ComposedPlate2D,
+    mesh: &strata_core::TriMesh,
+    sheet_full_tab_mode: bool,
+    with_dialog_overlay: bool,
+    dark_mode: bool,
+) -> RgbaImage {
     let w = 1440u32;
     let h = 900u32;
-    let mut img = RgbaImage::from_pixel(
-        w,
-        h,
-        Rgba([GROUND.rgb[0], GROUND.rgb[1], GROUND.rgb[2], 255]),
-    );
+    // 화면 크롬만 모드를 따른다. 실측 도판 내용물(ink/terra/탁본)은 항상 라이트와 동일.
+    let bg_col = if dark_mode {
+        Rgba([0x16, 0x15, 0x13, 255])
+    } else {
+        Rgba([GROUND.rgb[0], GROUND.rgb[1], GROUND.rgb[2], 255])
+    };
+    let mut img = RgbaImage::from_pixel(w, h, bg_col);
 
     let fill_rect = |img: &mut RgbaImage, x0: u32, y0: u32, rw: u32, rh: u32, col: Rgba<u8>| {
         let x1 = (x0 + rw).min(w);
@@ -96,8 +133,16 @@ pub fn render_full_workspace_offscreen_png(
         };
 
     let ink = Rgba([20, 20, 19, 255]);
-    let wash = Rgba([245, 244, 237, 255]);
-    let border = Rgba([209, 207, 196, 255]);
+    let wash = if dark_mode {
+        Rgba([0x23, 0x21, 0x1D, 255])
+    } else {
+        Rgba([245, 244, 237, 255])
+    };
+    let border = if dark_mode {
+        Rgba([0x5A, 0x53, 0x44, 255])
+    } else {
+        Rgba([209, 207, 196, 255])
+    };
     let terra = Rgba([181, 87, 58, 255]);
 
     fill_rect(&mut img, 0, 0, w, 34, wash);
@@ -154,6 +199,21 @@ pub fn render_full_workspace_offscreen_png(
 
     fill_rect(&mut img, sheet_x, work_y, sheet_w, 28, wash);
     fill_rect(&mut img, sheet_x, work_y + 28, sheet_w, 1, border);
+
+    // 다크 모드에서는 흰 용지 rect를 깔아야 라이트와 동일한 실측 도판이 보인다(출력물 불변).
+    // 라이트 모드는 기존 골든과 바이트 동일해야 하므로 종이를 깔지 않는다.
+    if dark_mode {
+        let paper_top = work_y + 29;
+        let paper_h = (h.saturating_sub(30)).saturating_sub(paper_top);
+        fill_rect(
+            &mut img,
+            sheet_x,
+            paper_top,
+            sheet_w,
+            paper_h,
+            Rgba([255, 255, 255, 255]),
+        );
+    }
 
     let cw = plate.canvas_width_mm.max(10.0);
     let ch = plate.canvas_height_mm.max(10.0);
@@ -242,8 +302,18 @@ pub fn render_full_workspace_offscreen_png(
         let mh = 420u32;
         let mx = (w - mw) / 2;
         let my = (h - mh) / 2;
-        fill_rect(&mut img, mx, my, mw, mh, Rgba([255, 255, 255, 255]));
-        fill_rect(&mut img, mx, my, mw, 38, wash);
+        let dlg_bg = if dark_mode {
+            Rgba([0x23, 0x21, 0x1D, 255])
+        } else {
+            Rgba([255, 255, 255, 255])
+        };
+        let dlg_head = if dark_mode {
+            Rgba([0x16, 0x15, 0x13, 255])
+        } else {
+            wash
+        };
+        fill_rect(&mut img, mx, my, mw, mh, dlg_bg);
+        fill_rect(&mut img, mx, my, mw, 38, dlg_head);
         fill_rect(&mut img, mx, my + 38, mw, 2, terra);
     }
 

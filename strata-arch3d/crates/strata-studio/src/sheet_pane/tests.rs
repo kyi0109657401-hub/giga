@@ -705,3 +705,86 @@ fn test_tdd22_measured_plan_dashed_fractures_light_control_and_6layer_delete() {
         "deleting layer 4 (추가 단면 A-A') must also signal clearing custom_section_line_mm"
     );
 }
+
+#[test]
+fn test_dark_offscreen_keeps_plate_output_pixels_identical() {
+    // 철칙: 화면 크롬만 다크, 실측 도판 픽셀은 라이트와 동일해야 한다.
+    use crate::sheet_pane::{
+        render_full_workspace_offscreen_png, render_full_workspace_offscreen_png_dark,
+    };
+    use strata_export::{ComposedPlate2D, PlateLayoutMode};
+
+    let plate = ComposedPlate2D {
+        mode: PlateLayoutMode::CompleteVesselStandard,
+        title: String::from("다크 불변 검증판"),
+        scale_preset: ScalePreset::Full1To1,
+        canvas_width_mm: 120.0,
+        canvas_height_mm: 90.0,
+        flip_exterior_right: false,
+        paths: vec![
+            strata_export::PlatePathElement {
+                layer_id: String::from("단면_실선"),
+                points_mm: vec![[10.0, 10.0], [110.0, 80.0]],
+                closed: false,
+                stroke_hex: String::from("#141413"),
+                stroke_width_mm: 0.4,
+                dash_pattern_mm: None,
+                fill_hex: None,
+            },
+            strata_export::PlatePathElement {
+                layer_id: String::from("횡단면_단면_실선"),
+                points_mm: vec![[20.0, 20.0], [60.0, 20.0], [40.0, 60.0]],
+                closed: true,
+                stroke_hex: String::from("#141413"),
+                stroke_width_mm: 0.3,
+                dash_pattern_mm: None,
+                fill_hex: Some(String::from("#141413")),
+            },
+        ],
+        callouts: vec![],
+        raster_regions: vec![],
+    };
+    let mesh = make_patterned_bowl_mesh();
+    let light = render_full_workspace_offscreen_png(&plate, &mesh, false, false);
+    let dark = render_full_workspace_offscreen_png_dark(&plate, &mesh, false, false);
+    assert_eq!((light.width(), light.height()), (1440, 900));
+    assert_eq!((dark.width(), dark.height()), (1440, 900));
+
+    // 시트 영역(헤더 제외)에서 배경 제외 그려진 픽셀 집합이 양쪽 동일해야 한다.
+    const LIGHT_BG: [u8; 3] = [250, 249, 245];
+    let mut drawn_light = Vec::new();
+    let mut drawn_dark = Vec::new();
+    for y in 198..870u32 {
+        for x in 518..1440u32 {
+            let pl = light.get_pixel(x, y).0;
+            let pd = dark.get_pixel(x, y).0;
+            if pl[0] != LIGHT_BG[0] || pl[1] != LIGHT_BG[1] || pl[2] != LIGHT_BG[2] {
+                drawn_light.push((x, y, pl));
+            }
+            if pd != [255, 255, 255, 255] {
+                drawn_dark.push((x, y, pd));
+            }
+        }
+    }
+    assert!(!drawn_light.is_empty(), "시트에 그려진 도판이 없음");
+    assert_eq!(
+        drawn_light, drawn_dark,
+        "다크 모드에서 실측 도판 픽셀이 바뀜 (출력물 불변 위반)"
+    );
+
+    // 화면 크롬(상단 바)은 실제로 바뀌어야 한다.
+    assert_ne!(
+        light.get_pixel(720, 10),
+        dark.get_pixel(720, 10),
+        "다크 모드에서 상단 바가 바뀌지 않음"
+    );
+    // 다크 바탕은 어둡고, 다크 용지는 흰색이어야 한다.
+    let db = dark.get_pixel(720, 10).0;
+    let dark_luma = (u16::from(db[0]) + u16::from(db[1]) + u16::from(db[2])) / 3;
+    assert!(dark_luma < 80, "다크 상단 바가 어둡지 않음: {db:?}");
+    assert_eq!(
+        dark.get_pixel(1000, 500).0,
+        [255, 255, 255, 255],
+        "다크 모드 용지가 흰색이 아님"
+    );
+}

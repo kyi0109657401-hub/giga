@@ -200,6 +200,8 @@ pub struct View3DPaneState {
     pub cached_curves_key: Option<CurvesCacheKey>,
     pub cached_v_segs: Vec<[[f64; 3]; 2]>,
     pub cached_h_segs: Vec<[[f64; 3]; 2]>,
+    /// 화면 UI 다크 모드 (뷰포트 바탕만 다크, 측정 격자·유물 색상은 불변).
+    pub dark_mode: bool,
 }
 
 impl std::fmt::Debug for View3DPaneState {
@@ -262,6 +264,7 @@ impl Default for View3DPaneState {
             cached_curves_key: None,
             cached_v_segs: Vec::new(),
             cached_h_segs: Vec::new(),
+            dark_mode: false,
         }
     }
 }

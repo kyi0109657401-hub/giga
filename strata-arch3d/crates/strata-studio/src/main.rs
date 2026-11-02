@@ -7,6 +7,7 @@ pub mod layout_r1;
 pub mod rubbing_ddg_pipeline;
 pub mod sheet_pane;
 pub mod splash;
+pub mod theme;
 pub mod view3d_pane;
 
 use dialogs::{show_active_dialog, ActiveStrataDialog};
@@ -27,7 +28,7 @@ use splash::SplashState;
 use std::path::{Path, PathBuf};
 use strata_core::strata_tokens::{
     metrics::{CTX_BAR_HEIGHT, RIBBON_HEIGHT, RIBBON_TILE_SIZE, STATUS_BAR_HEIGHT, TAB_BAR_HEIGHT},
-    tokens::{ACTION, CLAY_INK, CLAY_WASH, DESK, EDGE, GROUND, INK, LINE, MUTED, SURFACE, WASH},
+    tokens::{ACTION, CLAY_INK, CLAY_WASH, DESK, EDGE, GROUND, INK, LINE, WASH},
 };
 use strata_core::{
     ArtifactCategory, BeadDrillType, BeadSubtype, HandleAttachmentKind, ScalePreset, SherdSubtype,
@@ -261,6 +262,10 @@ pub struct StrataStudioApp {
     rubbing_params: RubbingRenderParams,
     flip_exterior_right: bool,
     sheet_full_tab_mode: bool,
+    /// 화면 UI 다크 모드 (기본 라이트). 실측 도판 출력물 색상은 항상 라이트 기준.
+    dark_mode: bool,
+    /// 마지막으로 적용된 테마 (`None` = 미적용, 변경 시에만 `apply_app_visuals` 호출).
+    theme_applied_dark: Option<bool>,
     /// Image 5 ("중간선은 사용자가 칸을 좌우로 늘일수있게하라"): 좌측 3D 뷰와 우측 2D 도판의 폭 비율 (`0.18 ..= 0.62`, 기본 `0.30`)
     split_left_ratio: f32,
     show_mm_grid: bool,
@@ -428,6 +433,8 @@ impl StrataStudioApp {
             rubbing_params: RubbingRenderParams::default(),
             flip_exterior_right: false,
             sheet_full_tab_mode: false,
+            dark_mode: false,
+            theme_applied_dark: None,
             split_left_ratio: 0.30,
             show_mm_grid: true,
             pose_locked: true,
@@ -1049,11 +1056,19 @@ impl eframe::App for StrataStudioApp {
             }
         }
 
-        show_active_dialog(ctx, &mut self.active_dialog);
+        show_active_dialog(ctx, &mut self.active_dialog, self.dark_mode);
 
+        // 다크 모드 전환 시에만 전역 비주얼을 갱신한다(매 프레임 갱신 금지).
+        if self.theme_applied_dark != Some(self.dark_mode) {
+            crate::theme::apply_app_visuals(ctx, self.dark_mode);
+            self.theme_applied_dark = Some(self.dark_mode);
+        }
+        self.view3d_state.dark_mode = self.dark_mode;
+
+        let chrome = crate::theme::chrome_for(self.dark_mode);
         let wash = egui::Color32::from_rgb(WASH.rgb[0], WASH.rgb[1], WASH.rgb[2]);
-        let hanji = egui::Color32::from_rgb(GROUND.rgb[0], GROUND.rgb[1], GROUND.rgb[2]);
-        let surface = egui::Color32::from_rgb(SURFACE.rgb[0], SURFACE.rgb[1], SURFACE.rgb[2]);
+        let hanji = chrome.panel;
+        let surface = chrome.panel;
         let _desk = egui::Color32::from_rgb(DESK.rgb[0], DESK.rgb[1], DESK.rgb[2]);
         let clay_wash =
             egui::Color32::from_rgb(CLAY_WASH.rgb[0], CLAY_WASH.rgb[1], CLAY_WASH.rgb[2]);
@@ -1061,7 +1076,8 @@ impl eframe::App for StrataStudioApp {
         let line_col = egui::Color32::from_rgb(LINE.rgb[0], LINE.rgb[1], LINE.rgb[2]);
         let edge_col = egui::Color32::from_rgb(EDGE.rgb[0], EDGE.rgb[1], EDGE.rgb[2]);
         let ink = egui::Color32::from_rgb(INK.rgb[0], INK.rgb[1], INK.rgb[2]);
-        let muted = egui::Color32::from_rgb(MUTED.rgb[0], MUTED.rgb[1], MUTED.rgb[2]);
+        // 상단 바 바탕이 다크로 바뀌므로 바 위 직접 글자는 테마 muted를 쓴다(칩 위 글자는 기존 유지).
+        let muted = chrome.muted;
         let terra = egui::Color32::from_rgb(ACTION.rgb[0], ACTION.rgb[1], ACTION.rgb[2]);
 
         let _ = (
@@ -1174,6 +1190,7 @@ impl eframe::App for StrataStudioApp {
                         }
                     }
                     ui.checkbox(&mut self.sheet_full_tab_mode, "Tab 도판확대");
+                    ui.checkbox(&mut self.dark_mode, "다크 모드");
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some(gpu_info) = self.detected_gpus.get(self.selected_gpu_idx) {

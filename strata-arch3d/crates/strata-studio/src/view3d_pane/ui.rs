@@ -46,6 +46,13 @@ pub fn render_view3d_pane_egui(
         egui::Color32::from_rgb(PROFILE_RED.rgb[0], PROFILE_RED.rgb[1], PROFILE_RED.rgb[2]);
     let select_blue =
         egui::Color32::from_rgb(SELECT_BLUE.rgb[0], SELECT_BLUE.rgb[1], SELECT_BLUE.rgb[2]);
+    // 다크 모드에서는 뷰포트 바탕만 다크로 바꾼다. 측정 격자·유물·칩·글자 색상은 그대로 둔다
+    // (칩은 밝은 바탕을 유지하므로 가독성이 깨지지 않는다. 실측 출력물 색상 불변 철칙).
+    let viewport_bg = if state.dark_mode {
+        crate::theme::chrome_for(true).desk
+    } else {
+        surface
+    };
 
     // 방향키(←/→/↑/↓)로도 유물 이동 및 수평횡단면(Alt+↑/↓) 미세이동 가능 (<USER_REQUEST>)
     ui.input(|i| {
@@ -195,7 +202,7 @@ pub fn render_view3d_pane_egui(
         }
 
         let tp = ui.painter_at(top_rect);
-        tp.rect_filled(top_rect, 3.0, surface);
+        tp.rect_filled(top_rect, 3.0, viewport_bg);
 
         let top_w = (top_rect.width().round() as u32).max(160);
         let top_h = (top_rect.height().round() as u32).max(140);
@@ -588,7 +595,7 @@ pub fn render_view3d_pane_egui(
         }
 
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 3.0, surface);
+        painter.rect_filled(rect, 3.0, viewport_bg);
 
         let is_dragging = response.dragged()
             || top_resp.dragged()

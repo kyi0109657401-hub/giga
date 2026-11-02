@@ -55,7 +55,14 @@ impl ActiveStrataDialog {
 }
 
 /// 현재 열린 표준 모달 대화상자를 렌더링하고, 닫기 요청 시 `true`를 반환한다.
-pub fn show_active_dialog(ctx: &egui::Context, dialog: &mut Option<ActiveStrataDialog>) -> bool {
+///
+/// `dark_mode`가 참이면 창 바탕이 다크가 되므로, 바탕 위 직접 글자만 다크용으로 밝힌다.
+/// 칩(`wash` 바탕) 위 글자는 라이트 값을 유지한다 (출력물 색상 불변 철칙과 동일하게 칩은 종이로 둔다).
+pub fn show_active_dialog(
+    ctx: &egui::Context,
+    dialog: &mut Option<ActiveStrataDialog>,
+    dark_mode: bool,
+) -> bool {
     let Some(active) = dialog.as_ref() else {
         return false;
     };
@@ -76,6 +83,43 @@ pub fn show_active_dialog(ctx: &egui::Context, dialog: &mut Option<ActiveStrataD
             let terra = egui::Color32::from_rgb(ACTION.rgb[0], ACTION.rgb[1], ACTION.rgb[2]);
             let wash = egui::Color32::from_rgb(WASH.rgb[0], WASH.rgb[1], WASH.rgb[2]);
             let _ = GROUND;
+            // 창 바탕 위 직접 글자 (다크에서는 밝힘). 칩 위 글자는 위 라이트 값을 그대로 쓴다.
+            let w_ink = if dark_mode {
+                egui::Color32::from_rgb(
+                    crate::theme::dark::INK[0],
+                    crate::theme::dark::INK[1],
+                    crate::theme::dark::INK[2],
+                )
+            } else {
+                ink
+            };
+            let w_muted = if dark_mode {
+                egui::Color32::from_rgb(
+                    crate::theme::dark::MUTED[0],
+                    crate::theme::dark::MUTED[1],
+                    crate::theme::dark::MUTED[2],
+                )
+            } else {
+                muted
+            };
+            let w_crimson = if dark_mode {
+                egui::Color32::from_rgb(
+                    crate::theme::dark::DIALOG_CRIMSON[0],
+                    crate::theme::dark::DIALOG_CRIMSON[1],
+                    crate::theme::dark::DIALOG_CRIMSON[2],
+                )
+            } else {
+                crimson
+            };
+            let w_jade = if dark_mode {
+                egui::Color32::from_rgb(
+                    crate::theme::dark::DIALOG_JADE[0],
+                    crate::theme::dark::DIALOG_JADE[1],
+                    crate::theme::dark::DIALOG_JADE[2],
+                )
+            } else {
+                jade
+            };
 
             match active {
                 ActiveStrataDialog::Error3Part(info) => {
@@ -110,11 +154,11 @@ pub fn show_active_dialog(ctx: &egui::Context, dialog: &mut Option<ActiveStrataD
                     ];
                     for (idx, s) in steps.iter().enumerate() {
                         let col = if idx < *current_step_idx {
-                            jade
+                            w_jade
                         } else if idx == *current_step_idx {
                             terra
                         } else {
-                            muted
+                            w_muted
                         };
                         let prefix = if idx < *current_step_idx {
                             "✓"
@@ -127,29 +171,32 @@ pub fn show_active_dialog(ctx: &egui::Context, dialog: &mut Option<ActiveStrataD
                     }
                     ui.add_space(8.0);
                     ui.add(egui::ProgressBar::new(*progress_pct / 100.0).show_percentage());
-                    ui.colored_label(ink, status_note);
+                    ui.colored_label(w_ink, status_note);
                 }
                 ActiveStrataDialog::SettingsM => {
-                    ui.colored_label(ink, "• 단면 외곽 실선 두께: 0.35 mm (구슬 확대 시 0.25 mm)");
-                    ui.colored_label(ink, "• 내부 박리 능선 / 보조선 두께: 0.20 mm");
                     ui.colored_label(
-                        ink,
+                        w_ink,
+                        "• 단면 외곽 실선 두께: 0.35 mm (구슬 확대 시 0.25 mm)",
+                    );
+                    ui.colored_label(w_ink, "• 내부 박리 능선 / 보조선 두께: 0.20 mm");
+                    ui.colored_label(
+                        w_ink,
                         "• 추정 복원선 / 천공 내벽 파선: 0.25 mm (dash 2.0, 1.5 mm)",
                     );
                     ui.colored_label(
-                        ink,
+                        w_ink,
                         "• SVG / PNG 출력 스케일 고정: 1 mm = 5.0 px (600 DPI 급)",
                     );
-                    ui.colored_label(ink, "• 한지(Hanji #FAF9F5) 손탁본 미세 섬유 결: 사용");
+                    ui.colored_label(w_ink, "• 한지(Hanji #FAF9F5) 손탁본 미세 섬유 결: 사용");
                 }
                 ActiveStrataDialog::PreExportVerifyL { checks } => {
                     ui.colored_label(
-                        ink,
+                        w_ink,
                         "출판 및 일러스트레이터(AI) 납품 전 8대 자동 검증(V1~V8) 결과:",
                     );
                     ui.add_space(6.0);
                     for (code, pass, detail) in checks {
-                        let col = if *pass { jade } else { crimson };
+                        let col = if *pass { w_jade } else { w_crimson };
                         let badge = if *pass {
                             "[통과 ✓]"
                         } else {
@@ -160,14 +207,14 @@ pub fn show_active_dialog(ctx: &egui::Context, dialog: &mut Option<ActiveStrataD
                 }
                 ActiveStrataDialog::TiledPrintPreviewL { plan } => {
                     ui.colored_label(
-                        ink,
+                        w_ink,
                         format!(
                             "• 1:1 실측 분할 매수: 총 {}매 ({}열 × {}행)",
                             plan.total_pages, plan.cols, plan.rows
                         ),
                     );
                     ui.colored_label(
-                        ink,
+                        w_ink,
                         format!(
                             "• 인접 시트 조립 여유분(Overlap): {:.1} mm + 재단 파선 + ⊕ 정합 마크",
                             plan.overlap_mm
@@ -180,12 +227,12 @@ pub fn show_active_dialog(ctx: &egui::Context, dialog: &mut Option<ActiveStrataD
                 }
                 ActiveStrataDialog::MultiArtifactPlateComposerXL { slot_titles } => {
                     ui.colored_label(
-                        ink,
+                        w_ink,
                         "발굴조사 보고서 다중 유물 합본 도판 (A4/A3 통일 축척 자동 정렬):",
                     );
                     ui.add_space(6.0);
                     for (idx, t) in slot_titles.iter().enumerate() {
-                        ui.colored_label(ink, format!("  도면 {} — {}", idx + 1, t));
+                        ui.colored_label(w_ink, format!("  도면 {} — {}", idx + 1, t));
                     }
                 }
             }
