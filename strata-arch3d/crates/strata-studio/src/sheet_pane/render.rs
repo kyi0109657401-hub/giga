@@ -788,7 +788,7 @@ pub fn render_sheet_pane_egui(
         let cy_elev_mm = 0.5 * (elev_reg_mm[1] + elev_reg_mm[3]);
         let top_elev_mm = elev_reg_mm[1].max(elev_reg_mm[3]);
         let half_d_mm = 0.5 * (elev_reg_mm[2] - elev_reg_mm[0]).abs().max(20.0);
-        let cy_plan_mm = top_elev_mm + half_d_mm + 34.0;
+        let cy_plan_mm = top_elev_mm + half_d_mm + 28.0;
         let cx_right_mm = 0.5 * (rub_reg_mm[0] + rub_reg_mm[2]);
         let cy_rub_mm = 0.5 * (rub_reg_mm[1] + rub_reg_mm[3]);
         let cy_hsec_mm = cy_elev_mm;
@@ -1012,13 +1012,22 @@ pub fn render_sheet_pane_egui(
                 "#5E5D59" => muted,
                 _ => dim_col,
             };
-            // 축척 라벨 3단("0" · 절반값 · "전체값(축척)")은 composer가 각인한 그대로 쓴다.
-            // (전역 치환은 3단을 모두 같은 문구로 덮어써서 금지.)
-            let shown_text = c.text.clone();
+            // 축척 라벨 3단("0" · 절반값 · "전체값(축척)") 및 각 뷰 상단 제목 라벨은 하단 기준(LEFT_BOTTOM)으로 그려서
+            // 줌 배율이나 유물 크기가 달라져도 글자가 아래쪽 도면 원호나 눈금선 안으로 절대 침범하지 않게 한다.
+            let align = if c.layer_id == "치수_축척라벨"
+                || c.layer_id == "평면도_라벨"
+                || c.layer_id == "탁본_라벨"
+                || c.layer_id == "횡단면_라벨"
+                || c.layer_id == "추가단면_라벨"
+            {
+                egui::Align2::LEFT_BOTTOM
+            } else {
+                egui::Align2::LEFT_TOP
+            };
             paper_painter.text(
                 pos,
-                egui::Align2::LEFT_TOP,
-                &shown_text,
+                align,
+                &c.text,
                 egui::FontId::proportional(10.5),
                 col,
             );

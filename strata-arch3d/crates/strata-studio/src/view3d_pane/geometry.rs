@@ -253,17 +253,51 @@ pub fn extract_topdown_plan_slice_2d(
     let off_x = state.artifact_offset_x_mm;
     let cut_y = state.cut_y_mm;
 
+    let mut min_px = f64::INFINITY;
+    let mut max_px = f64::NEG_INFINITY;
+    let mut min_py = f64::INFINITY;
+    let mut max_py = f64::NEG_INFINITY;
+    let mut min_wz = f64::INFINITY;
+    let mut max_wz = f64::NEG_INFINITY;
+
+    let mut world_pts: Vec<[f64; 3]> = Vec::with_capacity(mesh.positions.len());
+    for &pos in &mesh.positions {
+        let w = transform_local_vertex_full(
+            pos, center_xy, z_min, height_mm, cos_p, sin_p, cos_t, sin_t, cos_r, sin_r, off_x,
+        );
+        let px = w[0] - off_x;
+        let py = w[1] - cut_y;
+        if px.is_finite() && py.is_finite() && w[2].is_finite() {
+            min_px = min_px.min(px);
+            max_px = max_px.max(px);
+            min_py = min_py.min(py);
+            max_py = max_py.max(py);
+            min_wz = min_wz.min(w[2]);
+            max_wz = max_wz.max(w[2]);
+            world_pts.push([px, py, w[2]]);
+        }
+    }
+
+    let cx_2d = if min_px.is_finite() && max_px.is_finite() {
+        0.5 * (min_px + max_px)
+    } else {
+        0.0
+    };
+    let cy_2d = if min_py.is_finite() && max_py.is_finite() {
+        0.5 * (min_py + max_py)
+    } else {
+        0.0
+    };
+    let span_wz = (max_wz - min_wz).max(1.0);
+
     let mut bin_max_r = [0.0_f64; N_SECTORS];
     let mut bin_rim_z = [f64::NEG_INFINITY; N_SECTORS];
     let mut bin_foot_r = [0.0_f64; N_SECTORS];
     let mut bin_has = [false; N_SECTORS];
 
-    for &pos in &mesh.positions {
-        let w = transform_local_vertex_full(
-            pos, center_xy, z_min, height_mm, cos_p, sin_p, cos_t, sin_t, cos_r, sin_r, off_x,
-        );
-        let dx = w[0] - off_x;
-        let dy = w[1] - cut_y;
+    for &pt in &world_pts {
+        let dx = pt[0] - cx_2d;
+        let dy = pt[1] - cy_2d;
         let r = dx.hypot(dy);
         if r < 1.0 || !r.is_finite() {
             continue;
@@ -275,17 +309,40 @@ pub fn extract_topdown_plan_slice_2d(
         if r > bin_max_r[bi] {
             bin_max_r[bi] = r;
         }
-        if r >= r_nom * 0.72 && w[2] > bin_rim_z[bi] {
-            bin_rim_z[bi] = w[2];
+        if r >= r_nom * 0.72 && pt[2] > bin_rim_z[bi] {
+            bin_rim_z[bi] = pt[2];
         }
-        let is_flipped = state.tilt_deg.abs() > 90.0;
-        let in_foot_band = if is_flipped {
-            w[2] >= height_mm * 0.76
-        } else {
-            w[2] <= height_mm * 0.24
-        };
-        if in_foot_band && r < r_nom * 0.76 && r > bin_foot_r[bi] {
+        if (pt[2] - min_wz) <= span_wz * 0.24 && r < r_nom * 0.76 && r > bin_foot_r[bi] {
             bin_foot_r[bi] = r;
+        }
+    }
+
+    // 빈 섹터가 있더라도 r_nom 가짜 원으로 채우지 않고 가장 가까운 실제 정점 섹터로부터 보간한다.
+    let mut filled_max_r = bin_max_r;
+    for k in 0..N_SECTORS {
+        if !bin_has[k] {
+            let mut prev_r = None;
+            let mut next_r = None;
+            for step in 1..N_SECTORS {
+                let pk = ((k as isize - step as isize).rem_euclid(N_SECTORS as isize)) as usize;
+                if bin_has[pk] {
+                    prev_r = Some((step as f64, bin_max_r[pk]));
+                    break;
+                }
+            }
+            for step in 1..N_SECTORS {
+                let nk = (k + step) % N_SECTORS;
+                if bin_has[nk] {
+                    next_r = Some((step as f64, bin_max_r[nk]));
+                    break;
+                }
+            }
+            filled_max_r[k] = match (prev_r, next_r) {
+                (Some((dp, rp)), Some((dn, rn))) => (rp * dn + rn * dp) / (dp + dn).max(1.0),
+                (Some((_, rp)), None) => rp,
+                (None, Some((_, rn))) => rn,
+                (None, None) => r_nom,
+            };
         }
     }
 
@@ -299,10 +356,8 @@ pub fn extract_topdown_plan_slice_2d(
         for d in -1isize..=1isize {
             let nk = ((k as isize + d).rem_euclid(N_SECTORS as isize)) as usize;
             let w = if d == 0 { 1.0 } else { 0.45 };
-            if bin_has[nk] {
-                sum_o += bin_max_r[nk] * w;
-                sum_w += w;
-            }
+            sum_o += filled_max_r[nk] * w;
+            sum_w += w;
             if bin_foot_r[nk] > 3.0 {
                 sum_f += bin_foot_r[nk] * w;
                 sum_fw += w;
@@ -329,50 +384,41 @@ pub fn extract_topdown_plan_slice_2d(
         .collect();
     valid_zs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let ref_rim_z = if valid_zs.is_empty() {
-        height_mm
+        max_wz
     } else {
         valid_zs[(valid_zs.len() * 4 / 5).min(valid_zs.len().saturating_sub(1))]
     };
 
+    // 구연부 결손 복원 점선(is_broken)은 유물이 정위치 수평(upright) 상태이고
+    // 전체 원주 중 일부 구간만 깨진 경우에만 표시한다.
+    // 유물을 90° 등 회전·기울인 상태에서는 비원형 실루엣 전체를 가짜 점선 원으로 감싸지 않는다!
+    let is_upright_pose = state.tilt_deg.abs() < 15.0 && total_roll_deg.abs() < 15.0;
     let mut is_broken = [false; N_SECTORS];
-    let mut min_rel_z = f64::INFINITY;
-    let mut min_rel_k = 54usize;
-    for k in 0..N_SECTORS {
-        if !bin_has[k]
-            || outer_r[k] < recon_outer_r - (recon_outer_r * 0.035).max(1.4)
-            || (bin_rim_z[k].is_finite() && bin_rim_z[k] < ref_rim_z - (height_mm * 0.038).max(1.4))
-        {
-            is_broken[k] = true;
-        }
-        if bin_rim_z[k].is_finite() {
-            let dz = bin_rim_z[k] - ref_rim_z;
-            if dz < min_rel_z {
-                min_rel_z = dz;
-                min_rel_k = k;
+    if is_upright_pose {
+        let mut raw_broken = [false; N_SECTORS];
+        for k in 0..N_SECTORS {
+            if outer_r[k] < recon_outer_r - (recon_outer_r * 0.045).max(1.8)
+                || (bin_rim_z[k].is_finite()
+                    && bin_rim_z[k] < ref_rim_z - (height_mm * 0.045).max(1.8))
+            {
+                raw_broken[k] = true;
             }
         }
-    }
-    // 구연부 미세 결손(깨진 부분)이 정점 밀도상 완만하게 나타난 경우에도 최저 구연 고도 구간(±2 섹터)을 결손부(점선+파손실선)로 표시
-    let mut expanded_broken = is_broken;
-    if !is_broken.iter().any(|&b| b) {
-        for d in -2isize..=2isize {
-            let nk = ((min_rel_k as isize + d).rem_euclid(N_SECTORS as isize)) as usize;
-            expanded_broken[nk] = true;
-        }
-    } else {
-        for (k, &b) in is_broken.iter().enumerate() {
-            if b {
-                for d in -1isize..=1isize {
-                    let nk = ((k as isize + d).rem_euclid(N_SECTORS as isize)) as usize;
-                    expanded_broken[nk] = true;
+        let raw_count = raw_broken.iter().filter(|&&b| b).count();
+        if (1..=N_SECTORS / 2).contains(&raw_count) {
+            for (k, &b) in raw_broken.iter().enumerate() {
+                if b {
+                    for d in -1isize..=1isize {
+                        let nk = ((k as isize + d).rem_euclid(N_SECTORS as isize)) as usize;
+                        is_broken[nk] = true;
+                    }
                 }
             }
-        }
-    }
-    is_broken = expanded_broken;
-    for (k, &b) in is_broken.iter().enumerate() {
-        if b && outer_r[k] >= recon_outer_r - 1.2 {
-            outer_r[k] = (recon_outer_r - wall_t * 0.72).max(recon_inner_r + 0.6);
+            for (k, &b) in is_broken.iter().enumerate() {
+                if b && outer_r[k] >= recon_outer_r - 1.2 {
+                    outer_r[k] = (recon_outer_r - wall_t * 0.72).max(recon_inner_r + 0.6);
+                }
+            }
         }
     }
 
@@ -387,15 +433,35 @@ pub fn extract_topdown_plan_slice_2d(
             -std::f64::consts::PI + ((k as f64) + 0.5) * std::f64::consts::TAU / (N_SECTORS as f64);
         let (s, c) = a.sin_cos();
         let ro = outer_r[k];
-        let ri = (ro - wall_t).max(4.0);
         let rf = foot_r[k];
         let rfl = (rf - wall_t * 0.82).max(3.5);
         outer_ring.push([ro * c, ro * s]);
-        inner_ring.push([ri * c, ri * s]);
         foot_outer_ring.push([rf * c, rf * s]);
         floor_inner_ring.push([rfl * c, rfl * s]);
         if is_broken[k] {
             segments_2d.push([[k as f64, k as f64], [recon_outer_r, recon_inner_r]]);
+        }
+    }
+
+    // 내벽 윤곽선(inner_ring)은 외벽 윤곽선(outer_ring)의 실제 2D 다각형 내향 법선(`[-ty, tx]`) 방향으로
+    // 기벽 두께(wall_t)만큼 등거리 오프셋하여 어떤 회전·비원형 실루엣에서도 일정한 기벽 두께를 유지한다.
+    for k in 0..N_SECTORS {
+        let prev = outer_ring[(k + N_SECTORS - 1) % N_SECTORS];
+        let curr = outer_ring[k];
+        let next = outer_ring[(k + 1) % N_SECTORS];
+        let tx = next[0] - prev[0];
+        let ty = next[1] - prev[1];
+        let t_len = tx.hypot(ty);
+        if t_len > 1e-6 && !is_broken[k] {
+            let nx = -ty / t_len;
+            let ny = tx / t_len;
+            inner_ring.push([curr[0] + nx * wall_t, curr[1] + ny * wall_t]);
+        } else {
+            let a = -std::f64::consts::PI
+                + ((k as f64) + 0.5) * std::f64::consts::TAU / (N_SECTORS as f64);
+            let (s, c) = a.sin_cos();
+            let ri = (outer_r[k] - wall_t).max(4.0);
+            inner_ring.push([ri * c, ri * s]);
         }
     }
 

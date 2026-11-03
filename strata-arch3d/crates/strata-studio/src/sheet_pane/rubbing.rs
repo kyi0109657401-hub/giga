@@ -400,8 +400,18 @@ pub fn render_orthographic_rubbing_rgba_with_params(
     let du = (u_max - u_min).max(1e-3);
     let dv = (v_max - v_min).max(1e-3);
     let pad = 2.0f64;
-    let sx = ((w as f64) - pad * 2.0) / du;
-    let sy = ((h as f64) - pad * 2.0) / dv;
+    let sx_raw = ((w as f64) - pad * 2.0) / du;
+    let sy_raw = ((h as f64) - pad * 2.0) / dv;
+    // 직상방 1:1 정밀 탁본(`BottomPlanRubbing`, 비전개 모드)은 정사각형 텍스처 내부에서 등방성(1:1 종횡비) 스케일을 유지해야
+    // 90° 회전·기울임 시에도 좌측 3D 직상방 동심원 및 1:1 평면도와 100% 동일한 종횡비로 표현된다!
+    let (sx, sy, ox, oy) = if unrolled.is_none() && kind == PlateRasterKind::BottomPlanRubbing {
+        let s_iso = sx_raw.min(sy_raw);
+        let ox = 0.5 * ((w as f64) - du * s_iso);
+        let oy = 0.5 * ((h as f64) - dv * s_iso);
+        (s_iso, s_iso, ox, oy)
+    } else {
+        (sx_raw, sy_raw, pad, pad)
+    };
 
     let mut zbuf = vec![f32::NEG_INFINITY; w * h];
     let mut nbuf = vec![[0.0f32, 1.0f32, 0.0f32]; w * h];
@@ -432,12 +442,12 @@ pub fn render_orthographic_rubbing_rgba_with_params(
             }
         }
 
-        let x0 = (pad + (p0[0] - u_min) * sx) as f32;
-        let y0 = ((h as f64) - 1.0 - pad - (p0[1] - v_min) * sy) as f32;
-        let x1 = (pad + (p1[0] - u_min) * sx) as f32;
-        let y1 = ((h as f64) - 1.0 - pad - (p1[1] - v_min) * sy) as f32;
-        let x2 = (pad + (p2[0] - u_min) * sx) as f32;
-        let y2 = ((h as f64) - 1.0 - pad - (p2[1] - v_min) * sy) as f32;
+        let x0 = (ox + (p0[0] - u_min) * sx) as f32;
+        let y0 = ((h as f64) - 1.0 - oy - (p0[1] - v_min) * sy) as f32;
+        let x1 = (ox + (p1[0] - u_min) * sx) as f32;
+        let y1 = ((h as f64) - 1.0 - oy - (p1[1] - v_min) * sy) as f32;
+        let x2 = (ox + (p2[0] - u_min) * sx) as f32;
+        let y2 = ((h as f64) - 1.0 - oy - (p2[1] - v_min) * sy) as f32;
 
         let min_x = x0.min(x1).min(x2).floor().max(0.0) as i32;
         let max_x = x0.max(x1).max(x2).ceil().min((w - 1) as f32) as i32;

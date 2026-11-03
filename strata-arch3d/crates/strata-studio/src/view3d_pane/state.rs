@@ -302,7 +302,7 @@ impl Default for View3DPaneState {
             light_azimuth_deg: 315.0,
             light_elevation_deg: 45.0,
             light_intensity: 1.0,
-            show_light_window: true,
+            show_light_window: false,
             custom_section_draw_mode: false,
             custom_section_line_mm: None,
             custom_section_dragging_endpoint: None,

@@ -1223,3 +1223,91 @@ fn test_convex_and_concave_relief_keep_their_sign() {
         "양각 사면이 음각 사면보다 어두워야 함: bump={bump_ring:.1} crater={crater_ring:.1}"
     );
 }
+
+#[test]
+fn test_rotated_90_vessel_plan_and_section_fidelity_and_ui_layout_fixes() {
+    use strata_export::{compose_archaeological_plate, PlateComposeInput};
+    let mesh = make_patterned_bowl_mesh();
+    let m = compute_artifact_measurements(&mesh, ArtifactCategory::CompleteVessel);
+
+    // ⑥ 광원 조정 팝업 기본 비활성화 검증
+    let mut v3d = crate::view3d_pane::View3DPaneState::default();
+    assert!(
+        !v3d.show_light_window,
+        "초기 실행 시 광원 조정 팝업은 닫혀 있어야 함"
+    );
+
+    // 90° 앞으로 뒤집기 회전 적용
+    v3d.flip_artifact_forward_90();
+    assert!((v3d.tilt_deg - 90.0).abs() < 1e-5);
+
+    let vsec = crate::view3d_pane::slice_transformed_mesh_world_locked(&mesh, &v3d, true);
+    let hsec = crate::view3d_pane::slice_transformed_mesh_world_locked(&mesh, &v3d, false);
+    let top_plan = crate::view3d_pane::extract_topdown_plan_slice_2d(&mesh, &v3d);
+    let h_sections = vec![hsec, top_plan];
+
+    let plate = compose_archaeological_plate(&PlateComposeInput {
+        title: "90도회전_1대1_정합검증",
+        measurements: &m,
+        vertical_section: &vsec,
+        horizontal_sections: &h_sections,
+        occluded_spans: &[],
+        sherd_subtype: None,
+        sherd_strategy: None,
+        handle_attachment: None,
+        bead_subtype: None,
+        bead_drill_type: None,
+        wado_cut_ratio: None,
+        hemp_density_label: None,
+        flip_exterior_right: false,
+    });
+
+    // 1. 90° 회전 시 수직 단면도가 기존 유물 높이(55mm * 1.15 = 63.25mm 클램프)로 잘리지 않고
+    //    중간 동체부 원형 절단 직경(~80.8mm) 전체 높이를 1:1로 유지하는지 검증
+    let elev_reg = &plate.raster_regions[0];
+    let elev_h = (elev_reg.rect_mm[3] - elev_reg.rect_mm[1]).abs();
+    assert!(
+        elev_h > 75.0,
+        "90° 회전 단면 높이가 1:1 실측 절단 직경(>75mm, 무클램프)을 반영해야 함 (실제: {elev_h:.1}mm)"
+    );
+
+    // 2. 평면도 아래 불필요한 내부 원(`평면도_굽외경선`, `평면도_내저원각선`) 및 회전 시 가짜 외곽 점선 원(`평면도_결손복원_점선`)이 없어야 함
+    assert!(
+        !plate.paths.iter().any(|p| p.layer_id == "평면도_굽외경선"),
+        "불필요한 평면도_굽외경선이 생성되면 안 됨"
+    );
+    assert!(
+        !plate
+            .paths
+            .iter()
+            .any(|p| p.layer_id == "평면도_내저원각선"),
+        "불필요한 평면도_내저원각선이 생성되면 안 됨"
+    );
+    assert!(
+        !plate
+            .paths
+            .iter()
+            .any(|p| p.layer_id == "평면도_결손복원_점선"),
+        "90° 회전 시 가짜 결손복원 점선 원이 생성되면 안 됨"
+    );
+
+    // ⑦ 외저면_십자선이 레이어 0(① 1:1 평면도)으로 분류되는지 검증
+    assert_eq!(classify_plate_path_layer_idx("외저면_십자선"), 0);
+
+    // ② 선 두께 4번째 카드가 우상단 레이어 패널(238px)과 겹치지 않는지 검증
+    let viewport = egui::Rect::from_min_size(egui::pos2(400.0, 40.0), egui::vec2(1000.0, 800.0));
+    let cards = compute_non_overlapping_line_widget_rects(
+        egui::pos2(900.0, 400.0),
+        3.0,
+        [20.0, 20.0, 140.0, 100.0],
+        [0.0, 0.0, 0.0],
+        viewport,
+    );
+    let layer_panel_left = viewport.right() - 246.0;
+    assert!(
+        cards[3].right() <= layer_panel_left,
+        "4번째 선 카드 우측 끝({})이 도면 레이어 패널 좌측({})을 침범하면 안 됨",
+        cards[3].right(),
+        layer_panel_left
+    );
+}

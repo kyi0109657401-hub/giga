@@ -1102,11 +1102,16 @@ pub fn render_view3d_pane_egui(
         );
 
         let modes = SHADER_CHIP_MODES;
+        let avail_chip_w = (rect.width() - 12.0).max(240.0);
+        // 8개 칩(셰이더 5 + 정위치 + ★최적 + 💡광원)이 3D 뷰 우측 경계 밖으로 절대 잘리지 않도록 폭 비율 자동 조절
+        let width_scale = (avail_chip_w / 448.0).clamp(0.72, 1.0);
+        let chip_gap = (2.5 * width_scale).max(1.5);
+        let chip_font_sz = (9.6 * width_scale).clamp(8.0, 9.8);
         let mut chip_x = rect.left() + 6.0;
         let chip_y = rect.top() + 26.0;
         for m in modes {
             let label = m.label_kr();
-            let cw = (label.chars().count() as f32) * 10.0 + 10.0;
+            let cw = ((label.chars().count() as f32) * 8.6 + 8.0) * width_scale;
             let c_rect =
                 egui::Rect::from_min_size(egui::pos2(chip_x, chip_y), egui::vec2(cw, 19.0));
             let c_resp = ui.interact(
@@ -1151,21 +1156,21 @@ pub fn render_view3d_pane_egui(
                 c_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 label,
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(chip_font_sz),
                 if is_on { hanji } else { ink },
             );
-            chip_x += cw + 3.0;
+            chip_x += cw + chip_gap;
         }
 
         for (btn_id, btn_label, is_accent) in [
-            ("v3d_reset_front_chip", "정위치·수평 0°".to_string(), false),
+            ("v3d_reset_front_chip", "정위치 0°".to_string(), false),
             (
                 "v3d_best_angle_chip",
                 format!("★최적 {:.0}°", best_angle_deg),
                 true,
             ),
         ] {
-            let cw = (btn_label.chars().count() as f32) * 9.2 + 10.0;
+            let cw = ((btn_label.chars().count() as f32) * 8.0 + 8.0) * width_scale;
             let c_rect =
                 egui::Rect::from_min_size(egui::pos2(chip_x, chip_y), egui::vec2(cw, 19.0));
             let c_resp = ui.interact(c_rect, egui::Id::new(btn_id), egui::Sense::click());
@@ -1190,18 +1195,18 @@ pub fn render_view3d_pane_egui(
                 c_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 &btn_label,
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(chip_font_sz),
                 if is_accent { clay_ink } else { ink },
             );
-            chip_x += cw + 3.0;
+            chip_x += cw + chip_gap;
         }
 
         // Image 2 ("광원을 조정할수있는 작은창"): [★최적 ...] 버튼 바로 우측 자리에 광원 토글 칩 및 광원 조정 작은창 배치!
         let light_chip_lbl = format!(
-            "💡광원 {:.0}°/{:.0}°",
+            "💡{:.0}°/{:.0}°",
             state.light_azimuth_deg, state.light_elevation_deg
         );
-        let lcw = 86.0_f32;
+        let lcw = ((rect.right() - 6.0) - chip_x).clamp(58.0 * width_scale, 78.0);
         let lc_rect = egui::Rect::from_min_size(egui::pos2(chip_x, chip_y), egui::vec2(lcw, 19.0));
         let lc_resp = ui.interact(
             lc_rect,

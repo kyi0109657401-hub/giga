@@ -351,17 +351,18 @@ pub fn compute_non_overlapping_line_widget_rects(
     artifact_offset_mm: [f64; 3],
     viewport_rect: egui::Rect,
 ) -> [egui::Rect; 4] {
-    let w_px = 172.0_f32;
+    let w_px = 154.0_f32;
     let h_px = 25.0_f32;
-    let min_gap_x = 8.0_f32;
+    let min_gap_x = 6.0_f32;
     let step_x = w_px + min_gap_x;
 
     let v_min_x_mm = vessel_rect_mm[0].min(vessel_rect_mm[2]) + artifact_offset_mm[0];
     let vessel_left_px = origin_px.x + (v_min_x_mm as f32) * scale_px_per_mm;
 
     let total_w = 4.0 * w_px + 3.0 * min_gap_x;
-    let min_left = viewport_rect.left() + 12.0;
-    let max_left = (viewport_rect.right() - total_w - 12.0).max(min_left);
+    let min_left = viewport_rect.left() + 8.0;
+    // 우상단 `🗂 도면 레이어` 패널(폭 238px + 우측 여백 8px)과 제4번 카드(`치수선`)가 절대 겹치지 않도록 우측 한계를 `viewport_rect.right() - 250.0`으로 고정한다.
+    let max_left = (viewport_rect.right() - total_w - 250.0).max(min_left);
     let start_x = (vessel_left_px - 140.0).clamp(min_left, max_left);
     let top_y = (viewport_rect.top() + 36.0).min(viewport_rect.bottom() - h_px - 4.0);
 
@@ -584,7 +585,7 @@ pub fn sheet_layer_title_kr(layer_idx: usize) -> &'static str {
 pub fn classify_plate_path_layer_idx(layer_id: &str) -> usize {
     if layer_id.starts_with("추가단면_") {
         4
-    } else if layer_id.starts_with("평면도_") {
+    } else if layer_id.starts_with("평면도_") || layer_id == "외저면_십자선" {
         0
     } else if layer_id.starts_with("탁본_") {
         2

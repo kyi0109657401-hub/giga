@@ -144,7 +144,7 @@ impl ArtifactSlotEntry {
             append_artifact_label_block(&mut composed_plate, stem, "");
         }
 
-        Self {
+        let mut entry = Self {
             title: title_str,
             source_path,
             category,
@@ -162,7 +162,15 @@ impl ArtifactSlotEntry {
             occluded_spans,
             composed_plate,
             layout_mode_override: None,
-        }
+        };
+        // 초기 로드 직후에도 3D 뷰와 100% 동일한 월드-고정 절단 및 실측 직상방 평면도(`extract_topdown_plan_slice_2d`)로 도판을 동기화한다.
+        let init_v3d = View3DPaneState {
+            active_section_angle_deg: recommended_best_angle_deg,
+            top_cut_z_mm: default_top_z,
+            ..View3DPaneState::default()
+        };
+        entry.rebuild_plate(false, &init_v3d);
+        entry
     }
 
     fn rebuild_plate(&mut self, flip_exterior_right: bool, view3d_state: &View3DPaneState) {
@@ -1126,12 +1134,12 @@ impl eframe::App for StrataStudioApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    // 좌측 최상단: 작고 직관적인 [파일 열기] · [저장] 버튼
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    // 좌측 최상단: 작고 직관적인 [열기] · [저장] 버튼
                     if ui
                         .add(
                             egui::Button::new(
-                                egui::RichText::new("📂 파일 열기").size(11.5).color(terra),
+                                egui::RichText::new("📂 열기").size(11.0).color(terra),
                             )
                             .fill(clay_wash)
                             .stroke(egui::Stroke::new(1.0_f32, terra))
@@ -1144,7 +1152,7 @@ impl eframe::App for StrataStudioApp {
                     if ui
                         .add(
                             egui::Button::new(
-                                egui::RichText::new("💾 저장").size(11.5).color(ink),
+                                egui::RichText::new("💾 저장").size(11.0).color(ink),
                             )
                             .fill(wash)
                             .stroke(egui::Stroke::new(1.0_f32, edge_col))
@@ -1169,7 +1177,7 @@ impl eframe::App for StrataStudioApp {
                         };
                         let btn = egui::Button::new(
                             egui::RichText::new(format!("{}. {}", idx + 1, short_title))
-                                .size(11.5)
+                                .size(11.0)
                                 // 선택 슬롯은 먹 바탕이므로 양쪽 모드에서 흰 글자(명암비 확보).
                                 .color(if is_sel {
                                     egui::Color32::from_rgb(
@@ -1196,8 +1204,9 @@ impl eframe::App for StrataStudioApp {
                     if ui
                         .selectable_label(
                             self.sheet_state.roi_drag_mode,
-                            "⬚ 부분탁본 선택 (1:1 드래그)",
+                            "⬚ 부분탁본",
                         )
+                        .on_hover_text("우측 2D 도판에서 드래그하여 1:1 부분 정밀 탁본 영역 지정")
                         .clicked()
                     {
                         self.sheet_state.roi_drag_mode = !self.sheet_state.roi_drag_mode;
@@ -1205,8 +1214,9 @@ impl eframe::App for StrataStudioApp {
                     if ui
                         .selectable_label(
                             self.sheet_state.show_roi_rubbing_window,
-                            "정밀탁본창(농도)",
+                            "탁본창",
                         )
+                        .on_hover_text("정밀 탁본 농도·대비·선명도 독립 창 열기/닫기")
                         .clicked()
                     {
                         self.sheet_state.show_roi_rubbing_window =
@@ -1223,14 +1233,14 @@ impl eframe::App for StrataStudioApp {
                             );
                         }
                     }
-                    ui.checkbox(&mut self.sheet_full_tab_mode, "Tab 도판확대");
+                    ui.checkbox(&mut self.sheet_full_tab_mode, "Tab 확대");
                     ui.checkbox(&mut self.dark_mode, theme_mode.toggle_label_kr());
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some(gpu_info) = self.detected_gpus.get(self.selected_gpu_idx) {
                             let gpu_btn = egui::Button::new(
                                 egui::RichText::new(gpu_info.short_badge_text())
-                                    .size(10.5)
+                                    .size(10.0)
                                     .strong()
                                     .color(egui::Color32::from_rgb(22, 101, 52)),
                             )
@@ -1254,7 +1264,11 @@ impl eframe::App for StrataStudioApp {
                             ui.separator();
                         }
                         if let Some(slot) = self.slots.get(self.selected_slot_idx) {
-                            ui.colored_label(muted, format_compact_metric(&slot.measurements));
+                            ui.colored_label(
+                                muted,
+                                egui::RichText::new(format_compact_metric(&slot.measurements))
+                                    .size(11.0),
+                            );
                         }
 
                         // 8대 도판 모드 수동 선택 (자동 판정 / ①~⑧)
@@ -1268,8 +1282,8 @@ impl eframe::App for StrataStudioApp {
                             None => "도판 자동",
                         };
                         egui::ComboBox::from_id_salt("plate_layout_mode_combo")
-                            .selected_text(egui::RichText::new(combo_text).size(11.0))
-                            .width(88.0)
+                            .selected_text(egui::RichText::new(combo_text).size(10.5))
+                            .width(78.0)
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(&mut chosen, None, "자동 판정");
                                 for m in PlateLayoutMode::ALL {
@@ -1537,6 +1551,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut initial_unroll: Option<strata_shade::UnrollMode> = None;
     let mut initial_open: Option<PathBuf> = None;
     let mut save_project_path: Option<PathBuf> = None;
+    let mut initial_tilt_deg: Option<f64> = None;
+    let mut initial_yaw_deg: Option<f64> = None;
+    let mut initial_roll_deg: Option<f64> = None;
+    let mut initial_top_cut_z_mm: Option<f64> = None;
+    let mut initial_flip_right = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -1580,6 +1599,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--save-project" if i + 1 < args.len() => {
                 save_project_path = Some(PathBuf::from(&args[i + 1]));
                 i += 1;
+            }
+            "--tilt-deg" if i + 1 < args.len() => {
+                initial_tilt_deg = args[i + 1].parse::<f64>().ok();
+                i += 1;
+            }
+            "--yaw-deg" if i + 1 < args.len() => {
+                initial_yaw_deg = args[i + 1].parse::<f64>().ok();
+                i += 1;
+            }
+            "--roll-deg" if i + 1 < args.len() => {
+                initial_roll_deg = args[i + 1].parse::<f64>().ok();
+                i += 1;
+            }
+            "--top-cut-z" if i + 1 < args.len() => {
+                initial_top_cut_z_mm = args[i + 1].parse::<f64>().ok();
+                i += 1;
+            }
+            "--flip-right" => {
+                initial_flip_right = true;
             }
             _ => {}
         }
@@ -1644,6 +1682,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 initial_open,
                 save_project_path,
             );
+            let mut pose_changed = false;
+            if let Some(t) = initial_tilt_deg {
+                app.view3d_state.tilt_deg = t;
+                pose_changed = true;
+            }
+            if let Some(y) = initial_yaw_deg {
+                app.view3d_state.active_section_angle_deg = y;
+                pose_changed = true;
+            }
+            if let Some(r) = initial_roll_deg {
+                app.view3d_state.roll_deg = r;
+                pose_changed = true;
+            }
+            if let Some(z) = initial_top_cut_z_mm {
+                app.view3d_state.top_cut_z_mm = z;
+                pose_changed = true;
+            }
+            if initial_flip_right {
+                app.flip_exterior_right = true;
+                pose_changed = true;
+            }
+            if pose_changed {
+                if let Some(slot) = app.slots.get_mut(app.selected_slot_idx) {
+                    slot.rebuild_plate(app.flip_exterior_right, &app.view3d_state);
+                }
+            }
             if open_rubbing_win {
                 app.handle_tile_click("ROI_RUBBING_WIN");
             }
