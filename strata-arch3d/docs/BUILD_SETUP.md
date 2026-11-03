@@ -31,9 +31,7 @@ profile = "minimal"
 components = ["rustfmt", "clippy"]
 ```
 
-- rustup 이 설치된 PC·CI 에서는 이 파일만으로 1.91.1 + rustfmt + clippy 가 자동 설치된다.
-- **이 개발 PC 에는 rustup 실행 파일이 없다**(`~/.cargo/bin` 없음, `~/.rustup` 에는 toolchain 만 존재). 그래서 `rustup component add` 가 동작하지 않았고, 검증은 `static.rust-lang.org` 의 1.91.1 배포본 컴포넌트(rustfmt 1.8.0 / clippy 0.1.91, rustc 커밋 일치)를 임시 폴더에 풀어 PATH 로만 사용했다.
-- 영구 사용하려면 [rustup-init](https://rustup.rs) 설치를 권장한다. 그 뒤에는 위 파일이 나머지를 자동으로 맞춘다.
+- `rustup` 이 `%USERPROFILE%\.cargo\bin\rustup.exe` (`~/.cargo/bin`)에 정상 설치되어 있으며, `rust-toolchain.toml` 에 의해 `1.91.1` + `rustfmt` + `clippy` 가 자동 인식·적용된다.
 
 ## 3. 별칭 (`.cargo/config.toml`)
 
@@ -75,17 +73,18 @@ components = ["rustfmt", "clippy"]
 - 코드를 바꾼 뒤에는 두 줄로 갱신한다.
 
 ```powershell
-cd A:\giga\strata-arch3d
+Set-Location strata-arch3d
 cargo build --release -p strata-studio
 Copy-Item target\release\strata-studio.exe "$env:LOCALAPPDATA\Programs\STRATA\strata-studio.exe" -Force
+# 또는 원클릭 동기화 스크립트:
+# powershell -NoProfile -ExecutionPolicy Bypass -File .agents\skills\dongarch3d-studio\scripts\sync-desktop-shortcut.ps1
 ```
 
 - 저장 기능 자동 검증:
   `strata-studio.exe --open <mesh> --save-project <out.darch>` → 창이 6프레임 그려진 뒤
   현재 상태를 `.darch` 로 저장하고 스스로 종료한다(EXIT=0).
 
-## 8. 알려진 환경 제약
+## 8. Antigravity CLI (`agy`) 통합 검증 스크립트
 
-- 이 PC 에는 **rustup 실행 파일이 없다**(`~/.cargo/bin` 없음). clippy·rustfmt 는 배포본 컴포넌트를
-  임시 폴더에 풀어 PATH 로만 쓰고 있어 재부팅·정리 후 다시 준비해야 한다.
-  영구 사용하려면 [rustup-init](https://rustup.rs) 설치를 권장한다(설치되면 `rust-toolchain.toml` 이 자동 처리).
+- 전체 검증 게이트(`fmt-check` + `verify-v1` + `cargo test` + `--verify-all` + `--capture-window`):
+  `powershell -NoProfile -ExecutionPolicy Bypass -File .agents\skills\dongarch3d-studio\scripts\verify-gate.ps1`

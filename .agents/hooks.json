@@ -1,0 +1,17 @@
+{
+  "strata-command-guard": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import('node:fs').then(fs=>{const p=fs.existsSync('scripts/pre_tool_guard.mjs')?'./scripts/pre_tool_guard.mjs':'./.agents/scripts/pre_tool_guard.mjs';return import(p);})\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

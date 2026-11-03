@@ -1,21 +1,23 @@
-# C++ Core Rules
-1. 모던 C++(C++17/20) 표준을 준수하고 RAII 원칙을 철저히 적용한다.
-2. Raw 포인터(new/delete) 직접 사용을 지양하고 스마트 포인터 및 표준 컨테이너를 우선 사용한다.
-3. 빌드는 CMake 기반으로 구성하며 컴파일러 경고(-Wall -Wextra)가 없도록 작성한다.
-4. 기존 주석과 문서를 보존하고 불필요한 외부 의존성 추가를 자제한다.
+# STRATA · DongArch3D Rules (`gemini-4-argon` / DSH)
 
-# DongArch3D Architecture & Scope Rules
-1. **이원화 구조 준수 (`studio/` + `karch/`)**:
-   - UI 및 도판/입출력 셸은 `studio/` (Qt6 + MSVC + Ninja, `studio_core` 및 `DongArch3DStudio`)에서 개발한다.
-   - 고고학 기하 연산(구연부 PCA, ODR 회전축, 단면 절단, 실루엣, 5대 치수, DXF R12)은 Qt 무의존 엔진인 `GigaMesh/gui/src/dongarch/karch/` (`DongArch::KArch`)를 사용한다.
-   - 레거시 Qt5 GigaMesh Dock UI(`DongArchToolPalette`, `PropertyPanel`, `MeasurementPanel`)는 수정하지 않는다.
-2. **UI 절대 규칙 (「조용한 유물 도판」 — `docs/ui/UI_RULES.md`)**:
-   - **R0 정본 디자인 단일 원본**: 모든 화면·컴포넌트·도판 배치는 반드시 `docs/ui/UI_RULES.md`, `docs/ui/mockup/dongarch3d_mockup.html`, `docs/ui/mockup/dongarch3d_design_spec.md`, `docs/ui/mockup/mockup_01..05_*.png` 정본 디자인만 따른다. 정본에 없는 임의의 UI 디자인을 창작하거나 폐기된 구형 시안(`docs/dongarch3d/mockups/` 등)을 참조·복원하는 것을 엄격히 금지한다.
-   - **R1 고정 레이아웃**: 위에서 아래로 `탭 줄(34px) → 타일 리본(98px) → 지금 도구 줄 ctxBar(36px, 도구 파지 시에만 표시) → 작업 공간(슬롯 176px · 3D 보조창 ≈27% · 실측 도판 ≥73%) → 상태줄(30px)` 순서를 엄수한다. 추가 Dock/플로팅 패널/다크 테마를 금지하며 `Tab` 키로 도판 100% 최대화를 지원한다.
-   - **R2 색상 토큰**: 모든 색상은 반드시 `studio/src/Theme.h` 토큰만 참조한다. 단면선은 `#FF0000`(`ProfileRed`), 외곽선·중심축은 `#141413`(`OuterInk`)이며, 주 단추(`Action`, `#B5573A`)는 한 화면에 단 하나만 배치한다.
-   - **R5 도판 그리기 순서**: `방안 눈금(1/10/50mm) → 유물 음영(실사/깊이/D-Tak) → 외곽선·능선(OuterInk) → 단면선(ProfileRed)` 순서를 지키며 화면·미리보기·내보내기 모두 `Plate::paint` 단일 파이프라인을 공유한다. Artec 내벽 미스캔 추정 구간은 `#FF0000` 파선(`06_INTERIOR_OUTLINE`)으로 분리 표기한다.
-   - **R6 내보내기**: 모든 도면 좌표는 실제 `mm` 단위를 유지하며 SVG(5개 레이어 분리), DXF(R12, K-Arch 11 레이어 `01_AXIS_CENTER`~`11_SCALE_BAR`), PDF, PNG를 지원한다.
-3. **빌드·커밋·CI 최적화 불변식**:
-   - 컴파일러 경고는 MSVC `/W4`(GCC/Clang `-Wall -Wextra -Wpedantic`) 기준 **0건**을 유지하며, Release 빌드 최적화(`AVX2`, `LTO/IPO`, `PCH`)와 타깃별 `AUTOMOC`(`studio_core`, `DongArch3DStudio`만 활성화) 구성을 유지한다.
-   - 코드 변경 및 Git 커밋 전에는 반드시 `powershell -File studio/build.ps1 -Test`를 실행하여 11종 CTest(`studio_pipeline` + K-Arch 단위 테스트 10종) 100% 통과를 확인한다.
+## 1. 주력 개발 대상: `strata-arch3d/` (Rust 1.91.1 워크스페이스)
+1. 현재 모든 신규 기능 개발·버그 수정·UI 개선은 **`strata-arch3d/`** (8개 크레이트: `strata-core`, `strata-io`, `strata-orient`, `strata-measure`, `strata-section`, `strata-shade`, `strata-export`, `strata-studio`)에서 수행한다.
+2. 저장소 내 C++ 폴더(`studio/`, `GigaMesh/`)는 초기 프로토타입 및 알고리즘 참조용 **읽기 전용(Read-Only) 레퍼런스**이며, 별도 사용자 지시 없이는 수정하지 않는다.
 
+## 2. Rust Core Rules
+1. `#![forbid(unsafe_code)]`를 엄수하고 불필요한 `clone()`을 지양한다.
+2. 프로덕션 코드에서 `unwrap()`/`expect()` 사용을 금지하고 `Result<T, StrataError>`와 `?` 연산자로 복구 가능한 에러 처리를 수행한다.
+3. 모든 변경 후 `strata-arch3d/`에서 아래 검증 게이트를 통과해야 한다:
+   - `cargo fmt-check` (`cargo fmt --all -- --check`)
+   - `cargo verify-v1` (`cargo clippy --workspace --all-targets -- -D warnings`, 경고 0건)
+   - `cargo test --workspace` (주의: `release` 프로파일은 `panic = "abort"`이므로 테스트는 반드시 기본 `dev` 프로파일로 실행)
+   - `cargo run --release -p strata-studio -- --capture-window <out.png>` (실제 실행 창 프레임버퍼 캡처 검수)
+
+## 3. 브랜치 · 리뷰 · 배포 · 도판 규칙
+1. **기능별 브랜치 격리**: 기능 하나당 `feat/<주제>-<슬러그>` 브랜치 하나를 만들어 작업한다.
+2. **단계 완료 후 필수 리뷰 루프 (Commit → Push & GitHub Actions → `ego-browser` Gemini Argon 리뷰 → 검증 후 수정)**:
+   - 단계가 끝나면 반드시 ① `git commit` 및 `git push`(GitHub Actions 실행 포함)를 수행한 뒤, ② `ego-browser`(Ego Lite 브라우저) 안에서 GitHub에 연결되어 대기 중인 제미나이 아르곤(Gemini Argon)에게 리뷰를 요청하고, ③ 그 리뷰 내용이 맞는지 코드·명세와 대조 확인한 뒤 타당한 지적사항을 수정한다.
+3. **바탕화면 바로가기 고정 바이너리 갱신**: 병합 완료 시마다 `cargo build --release -p strata-studio` 후 `%LOCALAPPDATA%\Programs\STRATA\strata-studio.exe`로 복사하여 바탕화면 바로가기가 항상 최신 빌드를 실행하도록 유지한다.
+4. **도판 및 용어 규약**:
+   - 내부 단위는 `mm`(`f64`), 수직축·회전축은 `+Z`, 토기 도판 기본 배치는 **외면 왼쪽 · 단면 오른쪽**(`R` 키 반전).
+   - 영문 축약어 금지어를 쓰지 않고 반드시 **'정밀 탁본' (`rubbing` / `Rubbing`)**으로 표기한다.

@@ -8,6 +8,8 @@
       "Bash(git worktree list:*)",
       "Bash(cmake:*)",
       "Bash(ctest:*)",
+      "Bash(cargo:*)",
+      "Bash(rustc:*)",
       "Bash(pwsh factory/scripts/*)",
       "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File factory/scripts/*)"
     ],

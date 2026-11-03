@@ -3,7 +3,7 @@
   STRATA Rust CI 로컬 재현 — `.github/workflows/strata-rust-ci.yml` 과 같은 게이트를 이 PC 에서 돌린다.
 
 .DESCRIPTION
-  GitHub Actions 가 계정 결제 잠금 등으로 실행되지 않을 때 같은 검사를 로컬에서 수행한다.
+  GitHub Actions 와 동일한 5단계 검사를 로컬에서 수행한다.
     1) cargo fmt --all -- --check
     2) cargo check --workspace --all-targets --locked
     3) cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -29,7 +29,9 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
-# 이 PC 는 cargo 가 PATH 에 없고, clippy/rustfmt 는 임시 폴더에 풀려 있을 수 있다.
+# ~/.cargo/bin 및 rustup 툴체인을 PATH 에 우선 등록한다.
+$rustupCargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+if (Test-Path $rustupCargoBin) { $env:PATH = "$rustupCargoBin;$env:PATH" }
 $cargoBin = Join-Path $env:USERPROFILE '.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin'
 if (Test-Path $cargoBin) { $env:PATH = "$cargoBin;$env:PATH" }
 $toolBin = Join-Path $env:TEMP 'strata-tools\bin'

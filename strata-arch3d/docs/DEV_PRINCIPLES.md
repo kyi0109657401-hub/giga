@@ -1,7 +1,7 @@
 # STRATA · 동국유물실측 (DongSTRATA) 시니어 엔지니어링 팀 개발 원칙 및 하네스 규약 (v2.0)
 
-> **적용 범위**: `strata-strata` Rust 워크스페이스 전 크레이트 (`strata-core`, `strata-io`, `strata-orient`, `strata-measure`, `strata-section`, `strata-shade`, `strata-export`, `strata-studio`)
-> **기준 설계도**: [`docs/DESIGN_SPEC.md`](file:///D:/_dongarch_build/wt/.worktrees/STRATA-RUST/strata-strata/docs/DESIGN_SPEC.md) (v2.0), [`docs/IMPLEMENTATION_PLAN.md`](file:///D:/_dongarch_build/wt/.worktrees/STRATA-RUST/strata-strata/docs/IMPLEMENTATION_PLAN.md) (v2.0), [`docs/ui/UI_RULES.md`](file:///D:/_dongarch_build/wt/.worktrees/JOB-010/docs/ui/UI_RULES.md)
+> **적용 범위**: `strata-arch3d` Rust 워크스페이스 전 크레이트 (`strata-core`, `strata-io`, `strata-orient`, `strata-measure`, `strata-section`, `strata-shade`, `strata-export`, `strata-studio`)
+> **기준 설계도**: [`docs/DESIGN_SPEC.md`](DESIGN_SPEC.md) (v2.0), [`docs/IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (v2.0), [`../../docs/ui/UI_RULES.md`](../../docs/ui/UI_RULES.md)
 
 ---
 

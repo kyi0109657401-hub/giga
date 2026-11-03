@@ -1,84 +1,89 @@
 ---
 name: dongarch3d-studio
 description: >-
-  Build, test, capture verification screenshots, and develop features for DongArch3D Studio
-  (studio/ Qt6 shell and GigaMesh/gui/src/dongarch/karch/ geometry engine). Use this skill
-  whenever modifying studio/ or karch/ code, running pipeline tests, or verifying UI_RULES.md.
+  Build, test, capture native window screenshots, request Gemini Argon code reviews via ego-browser,
+  and develop features for STRATA / DongArch3D Studio (primary Rust workspace `strata-arch3d/` with
+  8 crates including `strata-studio`, plus frozen read-only C++ reference `studio/` and `karch/`).
+  Use this skill whenever modifying `strata-arch3d/` crates, running verification gates, capturing
+  screenshots, requesting Gemini Argon reviews, or updating the desktop shortcut binary.
 ---
 
-# DongArch3D Studio Development & Verification Skill
+# STRATA · DongArch3D Studio Development & Verification Skill (Antigravity CLI)
 
-## 1. Environment & Build Toolchain
-- **Compiler**: Visual Studio 2022 BuildTools (`vcvars64.bat`, MSVC C++20, `/utf-8 /W4 /permissive- /EHsc /Zc:__cplusplus`, Release: `/O2 /Ob2 /Oi /Ot /Gy /Zc:inline /fp:fast /arch:AVX2` + LTO/IPO + PCH)
-- **Generator**: CMake + Ninja (`AUTOMOC` scoped to Qt targets only)
-- **Qt Path**: `D:/OSGeo4W/apps/Qt6` (`Qt6::Core`, `Qt6::Gui`, `Qt6::Widgets`)
-- **Build Script**: [studio/build.ps1](../../../studio/build.ps1)
-- **CI Workflow**: [.github/workflows/studio-ci.yml](../../../.github/workflows/studio-ci.yml)
+## 1. Primary Target: `strata-arch3d/` (Rust Workspace)
 
-## 2. Standard Build, Test & Screenshot Workflow
-Always run the build and headless test suite after code modifications:
+- **Working Directory**: `strata-arch3d/` (or the isolated git worktree's `strata-arch3d/` subdirectory)
+- **Toolchain**: Rust `1.91.1` (`rustc`, `cargo`, `rustfmt`, `clippy` pinned via `strata-arch3d/rust-toolchain.toml` and installed in `~/.cargo/bin`)
+- **Workspace Lints**: `#![forbid(unsafe_code)]`, `clippy::all = "warn"`, `unwrap_used = "warn"`
+- **Profiles (`strata-arch3d/Cargo.toml`)**:
+  - `dev`: `opt-level = 1`, `dev.package."*" = { opt-level = 2 }` (fast incremental compilation + 8.3x faster unit tests)
+  - `release`: `opt-level = 3`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = "symbols"`
+  - **Important**: Because `release` sets `panic = "abort"`, never run `cargo test --release` (enforced by `.agents/hooks.json`). Always run tests in the default `dev` profile.
 
-1. **Incremental Build + 11 Parallel CTest Suites (`studio_pipeline` + 10 `karch_*` unit tests)**:
+## 2. Executable Helper Scripts (`scripts/`)
+
+1. **One-Click Full Verification Gate (`verify-gate.ps1`)**:
+   Runs `cargo fmt-check` → `cargo verify-v1` → `cargo test --workspace` → `--verify-all` (V1~V8) → `--capture-window`:
    ```powershell
-   powershell -File studio/build.ps1 -Test
+   powershell -NoProfile -ExecutionPolicy Bypass -File .agents\skills\dongarch3d-studio\scripts\verify-gate.ps1
    ```
-2. **Generate 5 Standard Verification Screenshots** (`shot_home.png`, `shot_main.png`, `shot_blind.png`, `shot_max.png`, `shot_export.png`):
+2. **Desktop Shortcut Binary Sync (`sync-desktop-shortcut.ps1`)**:
+   Builds `strata-studio` in release mode, copies `target\release\strata-studio.exe` to `%LOCALAPPDATA%\Programs\STRATA\strata-studio.exe`, and verifies SHA256 match:
    ```powershell
-   powershell -File studio/build.ps1 -Test -ShotDir studio/build-msvc/shots
+   powershell -NoProfile -ExecutionPolicy Bypass -File .agents\skills\dongarch3d-studio\scripts\sync-desktop-shortcut.ps1
    ```
-3. **Direct CLI Flags (`DongArch3DStudio.exe`)**:
-   - `--shot <file.png>`: Render current screen and exit
-   - `--sample`: Load synthetic 7°-tilted pottery jar with color & paddling texture
-   - `--blind`: Load narrow-neck pottery with un-scanned inner wall & hole-fill cap estimation
-   - `--max`: Toggle 100% plate maximization (`Tab`) before capture
-   - `--export`: Open export dialog and capture preview
+3. **`ego-browser` Gemini Argon Automated Review Request (`ego-gemini-review.mjs`)**:
+   Sends a review prompt for the pushed commit/branch to the connected Google Gemini (`Gemini Argon`) tab in `ego-browser`:
+   ```powershell
+   $scriptUri = (Resolve-Path ".agents\skills\dongarch3d-studio\scripts\ego-gemini-review.mjs").Path -replace '\\','/'
+   $env:STRATA_REVIEW_PROMPT = "저장소 https://github.com/kyi0109657401-hub/giga 의 브랜치/커밋 변경사항을 리뷰해 주세요: ..."
+   ego-browser nodejs -e "await import('file:///$scriptUri')"
+   ```
 
-## 3. Codebase Module Map
+## 3. Standard Verification & Deployment Workflow (`strata-arch3d/`)
 
-### `studio/src/` (UI Shell & Plate Engine)
-- `Theme.h`: R2 color tokens, R4 font helpers (`serifFont`, `monoFont`, `uiFont`), and global QSS.
-- `MeshIO.h/.cpp`: Multi-format loader (ASCII/Binary PLY with RGB/UV, fast OBJ+MTL+texture, VRML 2.0 `.wrl`, STL), floating noise removal (`< 2%`), auto `m/cm -> mm` unit scaling, scanner profile detection (`Artec Space Spider` / `Eva·Leo`), and spatial-grid 3D LOD generation (`<= 35,000` faces).
-- `ArtifactDoc.h/.cpp`: Document state orchestrating K-Arch pipeline (Rim PCA -> Axis ODR -> `R0/H0` alignment -> Section/Silhouette/5 Major Dimensions), Douglas–Peucker (`simplifyDP`) & Catmull–Rom (`smoothCatmull`), and Artec blind inner-wall estimation (`scannedSolidLines_` vs `estimatedInnerLines_`).
-- `MeshRaster.h/.cpp`: Software rasterizer for 3D preview and 2D plate shading (`Real` vertex color, `Depth`, `DTak` high-contrast curvature digital rubbing).
-- `Plate.h/.cpp`: Unified R5 plate renderer (`Plate::paint`) and R6 paper layout/exporters (`exportSvgLayered`, `exportPdf`, `exportPng`, `exportDxf`).
-- `MainWindow.h/.cpp`: R1 fixed window structure, Undo/Redo stack, global Drag & Drop, and `QFileSystemWatcher` Artec watch-folder auto-loader.
-- `Ribbon.h/.cpp`, `SheetView.h/.cpp`, `View3D.h/.cpp`, `StartPage.h/.cpp`, `ExportDialog.h/.cpp`: UI widgets strictly implementing R1–R8.
+When running commands manually inside `strata-arch3d/`:
 
-### `GigaMesh/gui/src/dongarch/karch/` (`DongArch::KArch` Engine)
-- **Alignment**: `TaubinFit`, `AnnulusClassifier`, `RimDetector`, `AxisPca`, `AxisOdr`
-- **Section & Profiling**: `MeshSlicer`, `Silhouette`, `SectionComposer`, `DimensionAnalyzer`
-- **IO & CAD**: `MeshLoader`, `SyntheticMeshGen`, `DxfWriter` (AutoCAD R12, 11 layers)
+1. **Format Check (`rustfmt`)**:
+   ```powershell
+   cargo fmt-check          # alias for: cargo fmt --all -- --check (use `cargo format` to apply)
+   ```
+2. **Strict Clippy Gate (0 warnings allowed)**:
+   ```powershell
+   cargo verify-v1          # alias for: cargo clippy --workspace --all-targets -- -D warnings
+   ```
+3. **Full Workspace Test Suite**:
+   ```powershell
+   cargo test --workspace   # or `cargo verify-all` for --nocapture
+   ```
+4. **Real Native Window Framebuffer Capture (`strata-studio.exe`)**:
+   ```powershell
+   cargo run --release -p strata-studio -- --capture-window <output.png>
+   cargo run --release -p strata-studio -- --tab 1 --capture-window <tab1.png>
+   cargo run --release -p strata-studio -- --open <mesh_path> --save-project <out.darch>
+   ```
+5. **Mandatory Commit → GitHub Actions → `ego-browser` Gemini Argon Review Loop**:
+   - At the end of every development step:
+     1. `git commit` and `git push origin <branch>` to trigger GitHub Actions (`strata-rust-ci.yml`).
+     2. Use `ego-browser` (`scripts/ego-gemini-review.mjs`) where Gemini Argon is connected to GitHub and waiting for review; request a review of the pushed commit/branch.
+     3. Inspect the Gemini review feedback, verify each point against the actual code and spec, and implement fixes for valid findings.
+6. **Post-Merge Desktop Shortcut Binary Update**:
+   Run `scripts/sync-desktop-shortcut.ps1` after merging to `main`.
 
-## 4. UI_RULES Verification Checklist
-Before finalizing any UI or rendering change, verify against [docs/ui/UI_RULES.md](../../../docs/ui/UI_RULES.md):
-- [ ] No extra Docks/panels added outside R1 fixed layout; `Tab` maximizes plate to 100%.
-- [ ] All colors reference `Theme.h` tokens; no hardcoded hex values.
-- [ ] Exactly one `Action` (`#B5573A`) primary button visible per screen.
-- [ ] At most one active hand tool (`Hand` state); `ctxBar` hides when tool is released.
-- [ ] All numbers use monospace font right-aligned with `Faint` `mm` unit labels.
-- [ ] Plate drawing order follows Grid -> Shade -> Outline (`#141413`) -> Section (`#FF0000`).
+## 4. Rust Workspace Crate Map (`strata-arch3d/crates/`)
 
-## 5. Canonical UI Mockups & Pitfalls
-- **Canonical Design Files (Single Source of Truth)**:
-  - Spec & Rules: `docs/ui/UI_RULES.md`, `docs/ui/mockup/dongarch3d_design_spec.md`
-  - Interactive HTML Reference: `docs/ui/mockup/dongarch3d_mockup.html`
-  - Visual Mockups:
-    - `docs/ui/mockup/mockup_01_pottery_main.png`: 토기 단면도 기본 작업 화면 (`--sample --shot`)
-    - `docs/ui/mockup/mockup_02_pottery_max100.png`: `Tab` 도판 100% 최대화 (`--sample --max --shot`)
-    - `docs/ui/mockup/mockup_03_lithic_4view.png`: 석기 4면 전개도(정면·우측면·배면·상면 + 박리 능선·타격점)
-    - `docs/ui/mockup/mockup_04_export_dialog.png`: 도면 내보내기 대화창 (`--sample --export --shot`)
-    - `docs/ui/mockup/mockup_05_start_home.png`: 시작 화면 (`--shot`)
-- **CMake + Ninja + MSVC Pitfalls**:
-  - Inside generator expressions (`$<$<CONFIG:Release>:...>`), always join multiple flags with `;` (`"$<$<CONFIG:Release>:/O2;/Ob2;/Oi;/Ot;/Gy;/Zc:inline;/fp:fast>"`), never spaces.
-  - Never pass `/MP` when `CMAKE_GENERATOR MATCHES "Ninja"` (causes MSVC `D9030` warning with `/showIncludes`).
-  - Never set global `CMAKE_AUTOMOC ON`; enable `AUTOMOC` only on `studio_core` and `DongArch3DStudio` so pure C++ targets (`karch` and 10 `test_*` executables) skip MOC generation.
+- **`strata-core`**: Core geometry/topology (`TriMesh` with UV/texture `MeshTextureRgba`), Stackless LBVH (`bvh.rs`), design tokens (`strata_tokens.rs`), 3-part structured error (`StrataError` in `error.rs`), and domain types (`types.rs`).
+- **`strata-io`**: `.obj` + `.mtl`/`.jpg` 4K bilinear texture loader (`obj_loader.rs`), ASCII/Binary `.ply` & `.stl` (`ply_stl.rs`), `.ap2` bidirectional transform/cut-plane codec (`ap2_codec.rs`), and `.darch` project serialization (`darch_codec.rs`).
+- **`strata-orient`**: 6-class artifact orientation, `Structure-from-Sherds++` 3-region fracture segmentation (`fracture_seg.rs`), Pratt+Taubin+Huber circle fitting (`circle_fit.rs`), Huber IRLS axis & rills solver (`axis_solver.rs`), 0°–360° rim defect scan (`defect_scan.rs`), bead perforation ODR (`bead_perforation.rs`), and BAISER refitting (`refit_baiser.rs`).
+- **`strata-measure`**: Precision archaeological metrics (`metrics.rs`: height, restored diameter ±σ, survival ratio, thickness, bead borehole calipers to `0.01 mm`, volume, estimated weight).
+- **`strata-section`**: Arbitrary/fixed plane slicing (`plane_slicer.rs`), occluded inner-wall dashed interpolation (`occluded_repair.rs`), and `kurbo` cubic Bézier fitting (`bezier_fit.rs`).
+- **`strata-shade`**: Precision Rubbing (`rubbing_engine.rs`: normal differential, MSII multi-scale curvature, DoG + Sigmoid ink transfer, orthographic multi-view raster), 5 differential feature lines (`feature_lines.rs`), 360° cylinder/cone/sphere unrolling (`unroll.rs`), and roof-tile hemp cloth FFT (`hemp_fft.rs`).
+- **`strata-export`**: 8-mode & 10-template CHS report plate composer (`plate_composer.rs`), Adobe Illustrator layered SVG (`svg_illustrator.rs`), `ret/` package exporter (`ret_exporter.rs`), 1:1 tiled PDF print (`pdf_tiled_print.rs`), and AutoCAD DXF R12 + dimension tables (`dxf_table_export.rs`).
+- **`strata-studio`**: Native `eframe`/`egui` desktop studio (`main.rs`, `layout_r1.rs`, `theme.rs`, `view3d_pane/*`, `sheet_pane/*`, `rubbing_ddg_pipeline.rs`, `dialogs.rs`, `harness_runner.rs`).
 
-## 6. REA Technical Reference (Artec · DongArch · GigaMesh)
-- **Artec SDK (`cdsdk.dll`, `Snx3Device_x64.dll`, `RAY2API.dll`)**:
-  - Runtime probe in `MeshIO::probeArtecSdk()` checks `cdGetDevices` without redistributing proprietary DLLs; watch-folder (`QFileSystemWatcher`) handles automatic import of `.ply/.obj/.wrl/.stl`.
-- **GigaMesh 9 CLI Tools Parity**:
-  - `gigamesh-clean`: `weldVertices` + `removeFloatingNoise` (`< 2%` island removal) + `erodeDanglingBorderFaces`
-  - `gigamesh-borders`: `extractBorderLoops` + `exportBordersPline` (`.pline`)
-  - `gigamesh-featurevectors`: Multi-Scale Integral Invariants (MSII) vertex `quality` scalar (`_r2.00_n4_v256.ply`) -> `DTak` digital rubbing
-  - `gigamesh-togltf` / `gigamesh-tolegacy`: `exportGltf2` (`.gltf`) / `exportLegacyPly` (`_Legacy.ply`)
+## 5. Core Rules & Invariants
 
+- **Terminology**: Always use the Korean standard term **'정밀 탁본'** and English identifier **`rubbing` / `Rubbing`**.
+- **Branch Isolation**: Implement each feature in its own dedicated branch (`feat/<topic>-<slug>`) before merging upon user approval.
+- **Legacy C++ Reference (`studio/` and `GigaMesh/gui/src/dongarch/karch/`)**:
+  - The C++20 Qt6 `studio/` folder and `karch/` static library are **frozen read-only references** used only for comparing historical algorithms or file format edge cases. Do not modify C++ files unless the user explicitly asks for C++ changes.
