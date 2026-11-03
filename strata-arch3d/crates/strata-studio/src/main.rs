@@ -1396,7 +1396,13 @@ impl eframe::App for StrataStudioApp {
                         // 병목 제거: 3D 뷰포트 마우스 드래그 중(is_interacting == true)에는
                         // 2D 탁본 래스터의 각도 키를 고정하여 드래그 중 180ms 블로킹을 0ms로 차단한다!
                         let sheet_psi = if self.view3d_state.is_interacting {
-                            self.last_rebuilt_angle_deg
+                            self.sheet_state
+                                .cached_key
+                                .as_ref()
+                                .map(|k| {
+                                    f64::from(k.0 .1) * crate::sheet_pane::RUBBING_PSI_QUANT_DEG
+                                })
+                                .unwrap_or(self.view3d_state.active_section_angle_deg)
                         } else {
                             self.view3d_state.active_section_angle_deg
                         };

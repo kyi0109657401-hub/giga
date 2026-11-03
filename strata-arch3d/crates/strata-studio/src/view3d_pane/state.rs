@@ -127,9 +127,17 @@ pub fn compute_isotropic_render_dimensions_hd(
     if dpr <= 1.0 {
         return (w, h);
     }
-    let phys_cap = if is_dragging { 1000 } else { 1600 };
-    let pw = ((w as f32 * dpr).round() as u32).clamp(64, phys_cap);
-    let ph = ((h as f32 * dpr).round() as u32).clamp(64, phys_cap);
+    let phys_cap = if is_dragging { 1000.0 } else { 1600.0 };
+    let wf = (w as f64) * f64::from(dpr);
+    let hf = (h as f64) * f64::from(dpr);
+    let max_phys = wf.max(hf);
+    let scale_down = if max_phys > phys_cap {
+        phys_cap / max_phys
+    } else {
+        1.0
+    };
+    let pw = (wf * scale_down).round().max(64.0) as u32;
+    let ph = ((pw as f64) * (rh / rw)).round().max(64.0) as u32;
     (pw, ph)
 }
 

@@ -719,3 +719,84 @@ fn test_dark_viewport_bg_three_candidates() {
         DarkViewportBg::WarmCharcoalGradient
     );
 }
+
+#[test]
+fn test_isotropic_render_dimensions_hd_preserves_aspect_ratio_on_drag() {
+    // AC-1: HiDPI(dpr > 1.0) 환경에서 마우스 드래그 시작(is_dragging=true) 및 종료(is_dragging=false) 시
+    // 가로·세로 해상도가 각각 따로 phys_cap(1000/1600)에 잘려 종횡비가 깨지면 텍스처가 길게 늘어난다.
+    // 어떤 뷰포트 크기와 dpr에서도 원본 종횡비(rect_w / rect_h)가 보존되어야 한다.
+    for &(rect_w, rect_h) in &[(520.0_f32, 740.0_f32), (820.0, 540.0), (640.0, 920.0)] {
+        let target_aspect = f64::from(rect_w) / f64::from(rect_h);
+        for &dpr in &[1.0_f32, 1.25, 1.5, 2.0, 2.5] {
+            for &dragging in &[false, true] {
+                let (pw, ph) =
+                    compute_isotropic_render_dimensions_hd(rect_w, rect_h, dragging, dpr);
+                let actual_aspect = (pw as f64) / (ph as f64);
+                let rel_err = ((actual_aspect - target_aspect) / target_aspect).abs();
+                assert!(
+                    rel_err < 0.015,
+                    "rect=({rect_w}x{rect_h}) dpr={dpr} dragging={dragging}: 렌더 타겟 ({pw}x{ph}) 종횡비 {actual_aspect:.4}가 원본 {target_aspect:.4}와 어긋남 (오차 {rel_err:.4})"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_topdown_plan_rotated_pose_no_fake_inner_ring_and_offset_aligned() {
+    // AC-3 & AC-5:
+    // 1) 유물을 90° 뒤집거나(tilt=90) 45° 기울였을 때(tilt=45) 위에서 본 평면도는 원형 대칭 그릇이 아니므로,
+    //    가짜 법선 오프셋 내벽 고리(2번째 폴리라인)를 생성하지 않고 단일 외곽 실루엣만 추출해야 한다.
+    // 2) 유물을 좌우(artifact_offset_x_mm)나 앞뒤(cut_y_mm)로 이동시켜도 2D 도판용 단면/평면 슬라이스의
+    //    로컬 중심축은 항상 0.0 근처에 정렬되어 상단 평면도와 하단 단면도의 축이 어긋나지 않아야 한다.
+    let mesh = make_test_bowl_mesh();
+
+    for &(tilt, roll) in &[(90.0, 0.0), (45.0, 0.0), (0.0, 90.0), (0.0, 45.0)] {
+        let state = View3DPaneState {
+            tilt_deg: tilt,
+            roll_deg: roll,
+            ..Default::default()
+        };
+        let plan = extract_topdown_plan_slice_2d(&mesh, &state);
+        assert_eq!(
+            plan.polylines_2d.len(),
+            1,
+            "비정위치(tilt={tilt}, roll={roll})에서 가짜 내벽 오프셋 고리가 생성되면 안 됨 (실제 개수: {})",
+            plan.polylines_2d.len()
+        );
+    }
+
+    // 유물 수평 이동(artifact_offset_x_mm = 28.0) 시 수직 단면, 수평 횡단면, 평면도의 X 중심 정렬 검증
+    let mut shifted_state = View3DPaneState {
+        artifact_offset_x_mm: 28.0,
+        ..Default::default()
+    };
+    shifted_state.initialize_top_cut_for_mesh(&mesh);
+    let vsec = slice_transformed_mesh_world_locked(&mesh, &shifted_state, true);
+    let hsec = slice_transformed_mesh_world_locked(&mesh, &shifted_state, false);
+    let plan = extract_topdown_plan_slice_2d(&mesh, &shifted_state);
+
+    let bbox_center_x = |slice: &strata_section::PlaneSliceResult| -> f64 {
+        let min_x = slice
+            .polylines_2d
+            .iter()
+            .flatten()
+            .map(|p| p[0])
+            .fold(f64::INFINITY, f64::min);
+        let max_x = slice
+            .polylines_2d
+            .iter()
+            .flatten()
+            .map(|p| p[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        0.5 * (min_x + max_x)
+    };
+
+    let v_cx = bbox_center_x(&vsec);
+    let h_cx = bbox_center_x(&hsec);
+    let p_cx = bbox_center_x(&plan);
+    assert!(
+        (v_cx - p_cx).abs() < 1.5 && (h_cx - p_cx).abs() < 1.5 && v_cx.abs() < 1.5,
+        "유물 이동 시에도 2D 도판용 수직단면({v_cx:.2}), 수평횡단면({h_cx:.2}), 평면도({p_cx:.2})의 로컬 X 중심이 모두 0에 정렬되어야 함"
+    );
+}

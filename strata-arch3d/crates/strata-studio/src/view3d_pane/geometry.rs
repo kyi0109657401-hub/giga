@@ -103,14 +103,19 @@ pub fn slice_transformed_mesh_world_locked(
     is_vertical_y_plane: bool,
 ) -> strata_section::PlaneSliceResult {
     let segs = extract_3d_plane_intersection_segments_full(mesh, state, is_vertical_y_plane);
+    let off_x = state.artifact_offset_x_mm;
+    let cut_y = state.cut_y_mm;
     let mut segments_2d: Vec<[[f64; 2]; 2]> = Vec::with_capacity(segs.len());
     for seg in &segs {
         if is_vertical_y_plane {
-            segments_2d.push([[seg[0][0], seg[0][2]], [seg[1][0], seg[1][2]]]);
+            segments_2d.push([
+                [seg[0][0] - off_x, seg[0][2]],
+                [seg[1][0] - off_x, seg[1][2]],
+            ]);
         } else {
             segments_2d.push([
-                [seg[0][0], seg[0][1] - state.cut_y_mm],
-                [seg[1][0], seg[1][1] - state.cut_y_mm],
+                [seg[0][0] - off_x, seg[0][1] - cut_y],
+                [seg[1][0] - off_x, seg[1][1] - cut_y],
             ]);
         }
     }
@@ -435,42 +440,36 @@ pub fn extract_topdown_plan_slice_2d(
         let ro = outer_r[k];
         let rf = foot_r[k];
         let rfl = (rf - wall_t * 0.82).max(3.5);
-        outer_ring.push([ro * c, ro * s]);
-        foot_outer_ring.push([rf * c, rf * s]);
-        floor_inner_ring.push([rfl * c, rfl * s]);
+        outer_ring.push([cx_2d + ro * c, cy_2d + ro * s]);
+        foot_outer_ring.push([cx_2d + rf * c, cy_2d + rf * s]);
+        floor_inner_ring.push([cx_2d + rfl * c, cy_2d + rfl * s]);
         if is_broken[k] {
             segments_2d.push([[k as f64, k as f64], [recon_outer_r, recon_inner_r]]);
         }
     }
 
-    // 내벽 윤곽선(inner_ring)은 외벽 윤곽선(outer_ring)의 실제 2D 다각형 내향 법선(`[-ty, tx]`) 방향으로
-    // 기벽 두께(wall_t)만큼 등거리 오프셋하여 어떤 회전·비원형 실루엣에서도 일정한 기벽 두께를 유지한다.
-    for k in 0..N_SECTORS {
-        let prev = outer_ring[(k + N_SECTORS - 1) % N_SECTORS];
-        let curr = outer_ring[k];
-        let next = outer_ring[(k + 1) % N_SECTORS];
-        let tx = next[0] - prev[0];
-        let ty = next[1] - prev[1];
-        let t_len = tx.hypot(ty);
-        if t_len > 1e-6 && !is_broken[k] {
-            let nx = -ty / t_len;
-            let ny = tx / t_len;
-            inner_ring.push([curr[0] + nx * wall_t, curr[1] + ny * wall_t]);
-        } else {
+    // 정위치(upright) 자세일 때만 원형 구연 내경선(inner_ring)을 추출하고,
+    // 90° 뒤집기·기울이기 등 비정위치(!is_upright_pose) 자세에서는 측면 실루엣 내부에
+    // 자기교차하는 가짜 법선 오프셋 내벽 고리를 만들지 않는다.
+    let polylines_2d = if is_upright_pose {
+        for (k, &ro) in outer_r.iter().enumerate() {
             let a = -std::f64::consts::PI
                 + ((k as f64) + 0.5) * std::f64::consts::TAU / (N_SECTORS as f64);
             let (s, c) = a.sin_cos();
-            let ri = (outer_r[k] - wall_t).max(4.0);
-            inner_ring.push([ri * c, ri * s]);
+            let ri = (ro - wall_t).max(4.0);
+            inner_ring.push([cx_2d + ri * c, cy_2d + ri * s]);
         }
-    }
+        vec![outer_ring, inner_ring, foot_outer_ring, floor_inner_ring]
+    } else {
+        vec![outer_ring]
+    };
 
     strata_section::PlaneSliceResult {
         orientation: strata_section::CutPlaneOrientation::HorizontalTransverse,
         psi_deg: state.active_section_angle_deg,
         offset_mm: -9999.0,
         segments_2d,
-        polylines_2d: vec![outer_ring, inner_ring, foot_outer_ring, floor_inner_ring],
+        polylines_2d,
     }
 }
 
@@ -614,9 +613,9 @@ pub fn extract_3d_plane_intersection_segments_full(
     let (sin_r, cos_r) = total_roll_deg.to_radians().sin_cos();
     let off_x = state.artifact_offset_x_mm;
     let plane_val_mm = if is_vertical_y_plane {
-        state.cut_y_mm
+        state.cut_y_mm + 1e-7
     } else {
-        state.top_cut_z_mm
+        state.top_cut_z_mm + 1e-7
     };
 
     let world_verts: Vec<[f64; 3]> = mesh

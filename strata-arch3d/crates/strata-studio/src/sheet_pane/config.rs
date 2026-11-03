@@ -589,6 +589,9 @@ pub fn classify_plate_path_layer_idx(layer_id: &str) -> usize {
         0
     } else if layer_id.starts_with("탁본_") {
         2
+    } else if layer_id == "횡단면_절단위치선" {
+        // 정면 입·단면도 위를 가로지르는 절단 위치선은 정면 단면도(레이어 1)와 함께 이동·회전해야 한다.
+        1
     } else if layer_id.starts_with("횡단면_") {
         3
     } else if layer_id.starts_with("치수_") || layer_id == "축척자_5cm" {
@@ -596,6 +599,76 @@ pub fn classify_plate_path_layer_idx(layer_id: &str) -> usize {
     } else {
         1
     }
+}
+
+/// 6개 도판 레이어의 회전·뒤집기 기준 중심점(`mm`)을 계산한다.
+pub fn compute_sheet_layer_centers_mm(plate: &strata_export::ComposedPlate2D) -> [[f64; 2]; 6] {
+    let elev_reg_mm = plate
+        .raster_regions
+        .first()
+        .map(|r| r.rect_mm)
+        .unwrap_or([36.0, 24.0, 160.0, 88.0]);
+    let rub_reg_mm = plate
+        .raster_regions
+        .get(1)
+        .map(|r| r.rect_mm)
+        .unwrap_or([180.0, 110.0, 300.0, 230.0]);
+    let cx_left_mm = 0.5 * (elev_reg_mm[0] + elev_reg_mm[2]);
+    let base_elev_mm = elev_reg_mm[1].min(elev_reg_mm[3]);
+    let top_elev_mm = elev_reg_mm[1].max(elev_reg_mm[3]);
+    let height_mm = (top_elev_mm - base_elev_mm).max(10.0);
+    let cy_elev_mm = 0.5 * (base_elev_mm + top_elev_mm);
+    let half_d_mm = 0.5 * (elev_reg_mm[2] - elev_reg_mm[0]).abs().max(20.0);
+    let cy_plan_fallback = top_elev_mm + half_d_mm + 28.0;
+    let cx_right_mm = 0.5 * (rub_reg_mm[0] + rub_reg_mm[2]);
+    let cy_rub_mm = 0.5 * (rub_reg_mm[1] + rub_reg_mm[3]);
+
+    let hsec_est_r = half_d_mm * 0.78;
+    let cy_hsec_default = base_elev_mm + height_mm * 0.42;
+    let rub_bottom = rub_reg_mm[1].min(rub_reg_mm[3]);
+    let stacked_cy = rub_bottom - hsec_est_r - 18.0;
+    let cy_hsec_fallback = cy_hsec_default.min(stacked_cy).max(hsec_est_r * 0.72 + 8.0);
+
+    let cx_custom_fallback = cx_right_mm + half_d_mm * 1.85 + 42.0;
+    let cy_custom_fallback = base_elev_mm + height_mm * 0.65;
+
+    let bbox_center_of = |pred: fn(&str) -> bool| -> Option<[f64; 2]> {
+        let mut min_x = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        let mut min_y = f64::INFINITY;
+        let mut max_y = f64::NEG_INFINITY;
+        let mut any = false;
+        for p in &plate.paths {
+            if pred(&p.layer_id) {
+                for &pt in &p.points_mm {
+                    min_x = min_x.min(pt[0]);
+                    max_x = max_x.max(pt[0]);
+                    min_y = min_y.min(pt[1]);
+                    max_y = max_y.max(pt[1]);
+                    any = true;
+                }
+            }
+        }
+        any.then_some([0.5 * (min_x + max_x), 0.5 * (min_y + max_y)])
+    };
+
+    let c_plan = bbox_center_of(|id| id == "외저면_십자선")
+        .or_else(|| bbox_center_of(|id| id.starts_with("평면도_")))
+        .unwrap_or([cx_left_mm, cy_plan_fallback]);
+    let c_hsec = bbox_center_of(|id| id == "횡단면_십자선")
+        .or_else(|| bbox_center_of(|id| id.starts_with("횡단면_") && id != "횡단면_절단위치선"))
+        .unwrap_or([cx_right_mm, cy_hsec_fallback]);
+    let c_custom = bbox_center_of(|id| id.starts_with("추가단면_"))
+        .unwrap_or([cx_custom_fallback, cy_custom_fallback]);
+
+    [
+        c_plan,
+        [cx_left_mm, cy_elev_mm],
+        [cx_right_mm, cy_rub_mm],
+        c_hsec,
+        c_custom,
+        [cx_left_mm, cy_elev_mm],
+    ]
 }
 
 pub(crate) type SheetRubbingCacheKey = (

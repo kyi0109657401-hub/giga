@@ -473,8 +473,11 @@ pub fn render_sheet_pane_egui(
             // 곡면 전개 탁본은 실제 (둘레 × 높이) mm 크기로 1:1 배치해야 모눈 위 계측이 성립한다.
             if region.kind == PlateRasterKind::BottomPlanRubbing {
                 if let Some([sw, sh]) = state.unrolled_size_mm {
-                    let w_px = (sw as f32) * scale;
-                    let h_px = (sh as f32) * scale;
+                    let (w_px, h_px) = if state.view_transforms[2].rot_90_steps % 2 == 1 {
+                        ((sh as f32) * scale, (sw as f32) * scale)
+                    } else {
+                        ((sw as f32) * scale, (sh as f32) * scale)
+                    };
                     let center = dst_rect.center();
                     let mut rect = egui::Rect::from_center_size(center, egui::vec2(w_px, h_px));
                     let dx = if rect.left() < p_rect.left() {
@@ -494,6 +497,20 @@ pub fn render_sheet_pane_egui(
                     rect = rect.translate(egui::vec2(dx, dy));
                     dst_rect = rect;
                     right_rubbing_box_px = Some(rect);
+                } else if state.view_transforms[2].flip_forward_steps % 2 == 1 {
+                    if let Some(first_reg) = plate.raster_regions.first() {
+                        let fw_px =
+                            ((first_reg.rect_mm[2] - first_reg.rect_mm[0]).abs() as f32) * scale;
+                        let fh_px =
+                            ((first_reg.rect_mm[3] - first_reg.rect_mm[1]).abs() as f32) * scale;
+                        let (w_px, h_px) = if state.view_transforms[2].rot_90_steps % 2 == 1 {
+                            (fh_px, fw_px)
+                        } else {
+                            (fw_px, fh_px)
+                        };
+                        dst_rect =
+                            egui::Rect::from_center_size(dst_rect.center(), egui::vec2(w_px, h_px));
+                    }
                 }
             }
 
@@ -784,24 +801,13 @@ pub fn render_sheet_pane_egui(
             .get(1)
             .map(|r| r.rect_mm)
             .unwrap_or([180.0, 110.0, 300.0, 230.0]);
-        let cx_left_mm = 0.5 * (elev_reg_mm[0] + elev_reg_mm[2]);
-        let cy_elev_mm = 0.5 * (elev_reg_mm[1] + elev_reg_mm[3]);
         let top_elev_mm = elev_reg_mm[1].max(elev_reg_mm[3]);
         let half_d_mm = 0.5 * (elev_reg_mm[2] - elev_reg_mm[0]).abs().max(20.0);
-        let cy_plan_mm = top_elev_mm + half_d_mm + 28.0;
-        let cx_right_mm = 0.5 * (rub_reg_mm[0] + rub_reg_mm[2]);
-        let cy_rub_mm = 0.5 * (rub_reg_mm[1] + rub_reg_mm[3]);
-        let cy_hsec_mm = cy_elev_mm;
-        let cx_custom_mm = cx_right_mm + half_d_mm * 1.85 + 42.0;
-        let cy_custom_mm = cy_rub_mm;
-        let layer_centers_mm: [[f64; 2]; 6] = [
-            [cx_left_mm, cy_plan_mm],
-            [cx_left_mm, cy_elev_mm],
-            [cx_right_mm, cy_rub_mm],
-            [cx_right_mm, cy_hsec_mm],
-            [cx_custom_mm, cy_custom_mm],
-            [cx_left_mm, cy_elev_mm],
-        ];
+        let layer_centers_mm = compute_sheet_layer_centers_mm(plate);
+        let [cx_left_mm, cy_plan_mm] = layer_centers_mm[0];
+        let [cx_right_mm, _] = layer_centers_mm[2];
+        let [_, cy_hsec_mm] = layer_centers_mm[3];
+        let [cx_custom_mm, cy_custom_mm] = layer_centers_mm[4];
 
         for elem in plate.paths.iter().filter(|_| state.unrolled_size_mm.is_none()) {
             if elem.points_mm.len() < 2 {

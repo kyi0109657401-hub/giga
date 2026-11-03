@@ -678,10 +678,6 @@ fn append_measured_top_plan_view_paths(
             .iter()
             .map(|p| [cx_plan + p[0], cy_plan + p[1]])
             .collect();
-        let in_pts: Vec<[f64; 2]> = inner_ring
-            .iter()
-            .map(|p| [cx_plan + p[0], cy_plan + p[1]])
-            .collect();
         paths.push(PlatePathElement {
             layer_id: String::from("평면도_외곽윤곽선"),
             points_mm: out_pts,
@@ -691,15 +687,21 @@ fn append_measured_top_plan_view_paths(
             dash_pattern_mm: None,
             fill_hex: None,
         });
-        paths.push(PlatePathElement {
-            layer_id: String::from("평면도_구연내경선"),
-            points_mm: in_pts,
-            closed: true,
-            stroke_hex: String::from("#141413"),
-            stroke_width_mm: 0.28,
-            dash_pattern_mm: None,
-            fill_hex: None,
-        });
+        if !inner_ring.is_empty() {
+            let in_pts: Vec<[f64; 2]> = inner_ring
+                .iter()
+                .map(|p| [cx_plan + p[0], cy_plan + p[1]])
+                .collect();
+            paths.push(PlatePathElement {
+                layer_id: String::from("평면도_구연내경선"),
+                points_mm: in_pts,
+                closed: true,
+                stroke_hex: String::from("#141413"),
+                stroke_width_mm: 0.28,
+                dash_pattern_mm: None,
+                fill_hex: None,
+            });
+        }
         return;
     }
 
@@ -1037,21 +1039,20 @@ fn compose_archaeological_plate_inner(
         .flatten()
         .map(|p| p[1])
         .fold(f64::NEG_INFINITY, f64::max);
-    let z_offset = if z_min_slice.is_finite() {
-        z_min_slice
-    } else {
-        0.0
-    };
+    let nominal_h = m.height_or_length_mm.max(10.0);
     let slice_span_z = if z_min_slice.is_finite() && z_max_slice.is_finite() {
         (z_max_slice - z_min_slice).max(0.0)
     } else {
         0.0
     };
-    let height = if slice_span_z > 4.0 {
-        slice_span_z
+    let z_offset = if z_min_slice.is_finite()
+        && (z_min_slice < -0.5 || z_max_slice > nominal_h + 1.5 || slice_span_z > nominal_h + 1.0)
+    {
+        z_min_slice
     } else {
-        m.height_or_length_mm.max(10.0)
+        0.0
     };
+    let height = nominal_h.max(slice_span_z);
 
     let has_custom_sec = input
         .horizontal_sections
@@ -1745,23 +1746,6 @@ fn compose_archaeological_plate_inner(
                                 },
                             });
                         }
-                    }
-                }
-                for raw_poly in &hsec.polylines_2d {
-                    if raw_poly.len() >= 3 {
-                        let pts: Vec<[f64; 2]> = raw_poly
-                            .iter()
-                            .map(|p| [cx_hsec + p[0], cy_hsec + p[1]])
-                            .collect();
-                        paths.push(PlatePathElement {
-                            layer_id: String::from("횡단면_실측윤곽선"),
-                            points_mm: pts,
-                            closed: false,
-                            stroke_hex: String::from("#B5573A"),
-                            stroke_width_mm: 0.24,
-                            dash_pattern_mm: None,
-                            fill_hex: None,
-                        });
                     }
                 }
 

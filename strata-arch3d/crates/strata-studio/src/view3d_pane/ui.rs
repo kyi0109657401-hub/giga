@@ -205,6 +205,9 @@ pub fn render_view3d_pane_egui(
         tp.rect_filled(top_rect, 3.0, viewport_bg);
 
         // HiDPI 대응은 ensure_topdown_cached 내부에서 1회만 계산한다 (호출부 선스케일 금지).
+        if top_resp.dragged() || custom_ep_dragged {
+            state.is_interacting = true;
+        }
         let dpr = ui.ctx().pixels_per_point().clamp(1.0, 4.0);
         let top_w = top_rect.width().round().max(1.0) as u32;
         let top_h = top_rect.height().round().max(1.0) as u32;
@@ -628,8 +631,10 @@ pub fn render_view3d_pane_egui(
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 3.0, viewport_bg);
 
+        let was_interacting = state.is_interacting;
         let is_dragging = response.dragged()
             || top_resp.dragged()
+            || custom_ep_dragged
             || top_dial_resp.dragged()
             || bot_dial_resp.dragged()
             || left_dial_resp.dragged()
@@ -670,7 +675,7 @@ pub fn render_view3d_pane_egui(
                 egui::Color32::WHITE,
             );
         }
-        if is_dragging {
+        if is_dragging || was_interacting {
             ui.ctx().request_repaint();
         }
 

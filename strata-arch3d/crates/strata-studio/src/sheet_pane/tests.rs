@@ -1311,3 +1311,207 @@ fn test_rotated_90_vessel_plan_and_section_fidelity_and_ui_layout_fixes() {
         layer_panel_left
     );
 }
+
+#[test]
+fn test_layer_centers_and_cut_line_classification() {
+    // AC-4:
+    // 1) 정면 입·단면도 위를 가로지르는 "횡단면_절단위치선"은 레이어 1(정면 단면도)로 분류되어야 한다.
+    //    (레이어 3으로 분류되면 우측 수평 횡단면을 90° 회전할 때 좌측 단면도 위의 절단선이 엉뚱한 곳으로 날아간다.)
+    assert_eq!(
+        classify_plate_path_layer_idx("횡단면_절단위치선"),
+        1,
+        "횡단면_절단위치선은 정면 단면·입면도(레이어 1)에 속해야 함"
+    );
+    assert_eq!(
+        classify_plate_path_layer_idx("횡단면_외벽윤곽선"),
+        3,
+        "횡단면_외벽윤곽선은 수평 횡단면(레이어 3)에 속해야 함"
+    );
+
+    // 2) compute_sheet_layer_centers_mm가 반환하는 각 레이어의 회전 중심이
+    //    실제 ComposedPlate2D 내 각 뷰(십자선/외곽선)의 기하 중심과 일치해야 한다.
+    use strata_export::{compose_archaeological_plate, PlateComposeInput};
+    let mesh = make_patterned_bowl_mesh();
+    let m = compute_artifact_measurements(&mesh, ArtifactCategory::CompleteVessel);
+    let mut v3d = crate::view3d_pane::View3DPaneState::default();
+    v3d.initialize_top_cut_for_mesh(&mesh);
+    let vsec = crate::view3d_pane::slice_transformed_mesh_world_locked(&mesh, &v3d, true);
+    let hsec = crate::view3d_pane::slice_transformed_mesh_world_locked(&mesh, &v3d, false);
+    let top_plan = crate::view3d_pane::extract_topdown_plan_slice_2d(&mesh, &v3d);
+    let mut custom_sec = vsec.clone();
+    custom_sec.orientation = strata_section::CutPlaneOrientation::VerticalLongitudinal;
+    let h_sections = vec![hsec, top_plan, custom_sec];
+
+    let plate = compose_archaeological_plate(&PlateComposeInput {
+        title: "레이어중심정합",
+        measurements: &m,
+        vertical_section: &vsec,
+        horizontal_sections: &h_sections,
+        occluded_spans: &[],
+        sherd_subtype: None,
+        sherd_strategy: None,
+        handle_attachment: None,
+        bead_subtype: None,
+        bead_drill_type: None,
+        wado_cut_ratio: None,
+        hemp_density_label: None,
+        flip_exterior_right: false,
+    });
+
+    let centers = compute_sheet_layer_centers_mm(&plate);
+
+    let layer_bbox_center = |layer_id: &str| -> [f64; 2] {
+        let pts: Vec<[f64; 2]> = plate
+            .paths
+            .iter()
+            .filter(|p| p.layer_id == layer_id)
+            .flat_map(|p| p.points_mm.iter().copied())
+            .collect();
+        assert!(!pts.is_empty(), "{layer_id} 경로가 존재해야 함");
+        let min_x = pts.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
+        let max_x = pts.iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max);
+        let min_y = pts.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
+        let max_y = pts.iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max);
+        [0.5 * (min_x + max_x), 0.5 * (min_y + max_y)]
+    };
+
+    let actual_plan_c = layer_bbox_center("외저면_십자선");
+    let actual_rub_c = layer_bbox_center("탁본_십자선");
+    let actual_hsec_c = layer_bbox_center("횡단면_십자선");
+    let actual_custom_c = layer_bbox_center("추가단면_실선");
+
+    assert!(
+        (centers[0][0] - actual_plan_c[0]).hypot(centers[0][1] - actual_plan_c[1]) < 1.0,
+        "평면도(레이어 0) 회전 중심 불일치: {:?} vs {:?}",
+        centers[0],
+        actual_plan_c
+    );
+    assert!(
+        (centers[2][0] - actual_rub_c[0]).hypot(centers[2][1] - actual_rub_c[1]) < 1.0,
+        "정밀 탁본(레이어 2) 회전 중심 불일치: {:?} vs {:?}",
+        centers[2],
+        actual_rub_c
+    );
+    assert!(
+        (centers[3][0] - actual_hsec_c[0]).hypot(centers[3][1] - actual_hsec_c[1]) < 1.0,
+        "수평 횡단면(레이어 3) 회전 중심 불일치: {:?} vs {:?}",
+        centers[3],
+        actual_hsec_c
+    );
+    assert!(
+        (centers[4][0] - actual_custom_c[0]).abs() < 3.0
+            && (centers[4][1] - actual_custom_c[1]).abs() < 3.0,
+        "추가 단면(레이어 4) 회전 중심 불일치: {:?} vs {:?}",
+        centers[4],
+        actual_custom_c
+    );
+}
+
+#[test]
+fn test_whole_plate_views_alignment_consistency() {
+    // AC-3 & AC-5:
+    // 1) 유물이 좌우 이동(artifact_offset_x_mm = 30.0)했을 때도 2D 도판의 1:1 평면도와 1:1 정면 입·단면도,
+    //    중심_기준선, 1:1 수평 횡단면이 각자의 기준 축(cx, cx_right) 위에 정확히 정렬되어야 한다.
+    // 2) 90° 회전 자세에서 가짜 평면도_구연내경선이 생성되지 않아야 한다.
+    // 3) 온전한 수평 횡단면(닫힌 고리)에서 중복된 횡단면_실측윤곽선이 겹쳐 생성되지 않아야 한다.
+    use strata_export::{compose_archaeological_plate, PlateComposeInput};
+    let mesh = make_patterned_bowl_mesh();
+    let m = compute_artifact_measurements(&mesh, ArtifactCategory::CompleteVessel);
+
+    let mut v3d = crate::view3d_pane::View3DPaneState {
+        artifact_offset_x_mm: 30.0,
+        ..Default::default()
+    };
+    v3d.initialize_top_cut_for_mesh(&mesh);
+    let vsec = crate::view3d_pane::slice_transformed_mesh_world_locked(&mesh, &v3d, true);
+    let hsec = crate::view3d_pane::slice_transformed_mesh_world_locked(&mesh, &v3d, false);
+    let top_plan = crate::view3d_pane::extract_topdown_plan_slice_2d(&mesh, &v3d);
+    let h_sections = vec![hsec, top_plan];
+
+    let plate = compose_archaeological_plate(&PlateComposeInput {
+        title: "전체도면정렬검증",
+        measurements: &m,
+        vertical_section: &vsec,
+        horizontal_sections: &h_sections,
+        occluded_spans: &[],
+        sherd_subtype: None,
+        sherd_strategy: None,
+        handle_attachment: None,
+        bead_subtype: None,
+        bead_drill_type: None,
+        wado_cut_ratio: None,
+        hemp_density_label: None,
+        flip_exterior_right: false,
+    });
+
+    let center_line_x = plate
+        .paths
+        .iter()
+        .find(|p| p.layer_id == "중심_기준선")
+        .expect("중심_기준선 존재")
+        .points_mm[0][0];
+
+    // 평면도 외곽선의 X 중심과 정면 입·단면도(단면_실선 + 외곽선_실선)의 X 중심이 모두 중심_기준선(cx)과 일치해야 함
+    let plan_xs: Vec<f64> = plate
+        .paths
+        .iter()
+        .filter(|p| p.layer_id == "평면도_외곽윤곽선")
+        .flat_map(|p| p.points_mm.iter().map(|pt| pt[0]))
+        .collect();
+    let plan_cx = 0.5
+        * (plan_xs.iter().cloned().fold(f64::INFINITY, f64::min)
+            + plan_xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+
+    let elev_xs: Vec<f64> = plate
+        .paths
+        .iter()
+        .filter(|p| p.layer_id == "단면_실선" || p.layer_id == "외곽선_실선")
+        .flat_map(|p| p.points_mm.iter().map(|pt| pt[0]))
+        .collect();
+    let elev_cx = 0.5
+        * (elev_xs.iter().cloned().fold(f64::INFINITY, f64::min)
+            + elev_xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+
+    assert!(
+        (plan_cx - center_line_x).abs() < 1.5 && (elev_cx - center_line_x).abs() < 1.5,
+        "평면도 중심({plan_cx:.2})과 정면 입·단면도 중심({elev_cx:.2})이 중심_기준선({center_line_x:.2})에 수직 정렬되어야 함"
+    );
+
+    // 온전한 닫힌 고리 수평 횡단면에서 이중 겹선(횡단면_실측윤곽선)이 중복 생성되면 안 됨
+    assert!(
+        !plate
+            .paths
+            .iter()
+            .any(|p| p.layer_id == "횡단면_실측윤곽선"),
+        "온전한 수평 횡단면에서 이중 겹침선(횡단면_실측윤곽선)이 생성되면 안 됨"
+    );
+
+    // 90° 회전 시 가짜 내벽 고리(평면도_구연내경선)가 생성되지 않아야 함
+    let mut v3d_rot = crate::view3d_pane::View3DPaneState::default();
+    v3d_rot.flip_artifact_forward_90();
+    let vsec_r = crate::view3d_pane::slice_transformed_mesh_world_locked(&mesh, &v3d_rot, true);
+    let hsec_r = crate::view3d_pane::slice_transformed_mesh_world_locked(&mesh, &v3d_rot, false);
+    let top_plan_r = crate::view3d_pane::extract_topdown_plan_slice_2d(&mesh, &v3d_rot);
+    let plate_r = compose_archaeological_plate(&PlateComposeInput {
+        title: "90도회전평면도검증",
+        measurements: &m,
+        vertical_section: &vsec_r,
+        horizontal_sections: &[hsec_r, top_plan_r],
+        occluded_spans: &[],
+        sherd_subtype: None,
+        sherd_strategy: None,
+        handle_attachment: None,
+        bead_subtype: None,
+        bead_drill_type: None,
+        wado_cut_ratio: None,
+        hemp_density_label: None,
+        flip_exterior_right: false,
+    });
+    assert!(
+        !plate_r
+            .paths
+            .iter()
+            .any(|p| p.layer_id == "평면도_구연내경선"),
+        "90° 회전 자세의 평면도에서 가짜 내벽 오프셋 고리(평면도_구연내경선)가 생성되면 안 됨"
+    );
+}
