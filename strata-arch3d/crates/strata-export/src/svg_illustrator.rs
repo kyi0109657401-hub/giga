@@ -313,8 +313,8 @@ pub fn render_plate_to_illustrator_svg_with_options(
     );
     let _ = writeln!(
         svg,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{w_px:.0}px" height="{h_px:.0}px" viewBox="0 0 {w_px:.0} {h_px:.0}" data-scale-px-per-mm="{PX_PER_MM_1TO1:.1}" data-plate-mode="{:?}">"#,
-        plate.mode
+        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{:.1}mm" height="{:.1}mm" viewBox="0 0 {w_px:.0} {h_px:.0}" data-scale-px-per-mm="{PX_PER_MM_1TO1:.1}" data-plate-mode="{:?}">"#,
+        plate.canvas_width_mm, plate.canvas_height_mm, plate.mode
     );
     if !provenance.is_empty() {
         let _ = writeln!(

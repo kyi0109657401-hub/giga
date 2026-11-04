@@ -4,6 +4,7 @@ pub mod dialogs;
 pub mod gpu_backend;
 pub mod harness_runner;
 pub mod layout_r1;
+pub mod publication_tab;
 pub mod rubbing_ddg_pipeline;
 pub mod self_auditor;
 pub mod sheet_pane;
@@ -299,6 +300,7 @@ pub struct StrataStudioApp {
     selected_slot_idx: usize,
     view3d_state: View3DPaneState,
     sheet_state: SheetPaneState,
+    pub_state: publication_tab::PublicationLayoutState,
     rubbing_params: RubbingRenderParams,
     flip_exterior_right: bool,
     sheet_full_tab_mode: bool,
@@ -538,6 +540,7 @@ impl StrataStudioApp {
                 s.rubbing_params.unroll_mode = initial_unroll;
                 s
             },
+            pub_state: publication_tab::PublicationLayoutState::default(),
             rubbing_params: RubbingRenderParams {
                 // B-통일 고정점: 내보내기·저장 경로 농도도 표준 78%로 맞춘다.
                 ink_density_pct: crate::sheet_pane::RUBBING_STANDARD_INK_PCT,
@@ -1031,29 +1034,36 @@ impl StrataStudioApp {
             }
             "EXP_PDF" => {
                 if let Some(slot) = self.slots.get(self.selected_slot_idx) {
-                    let (wysiwyg_plate, _) = crate::sheet_pane::build_wysiwyg_exported_plate(
+                    if self.pub_state.auto_fitted_slot_title != slot.composed_plate.title {
+                        self.pub_state
+                            .auto_fit_to_paper(&slot.measurements, &slot.composed_plate.title);
+                    }
+                    let comp = publication_tab::compose_publication_page_plate(
                         &slot.composed_plate,
+                        &slot.measurements,
+                        slot.source_path.as_deref(),
                         &self.sheet_state,
+                        &self.pub_state,
                     );
                     if let Some(out_path) = rfd::FileDialog::new()
-                        .add_filter("1:1 분할 인쇄 도판 (.pdf)", &["pdf"])
-                        .set_file_name("strata_plate_1to1.pdf")
+                        .add_filter("출판 조판 도판 (.pdf)", &["pdf"])
+                        .set_file_name("strata_publication_plate.pdf")
                         .save_file()
                     {
                         let pdf_bytes = render_plate_to_pdf_bytes(
-                            &wysiwyg_plate,
+                            &comp.page_plate,
                             PaperSheetSize::A4Portrait,
-                            10.0,
+                            self.pub_state.margin_mm,
                         );
                         if std::fs::write(&out_path, &pdf_bytes).is_ok() {
                             self.status_message =
-                                format!("1:1 PDF 도판 내보내기 완료: {}", out_path.display());
+                                format!("출판 조판 PDF 내보내기 완료: {}", out_path.display());
                         }
                     } else {
                         let plan = compute_tiled_print_plan(
-                            &wysiwyg_plate,
+                            &comp.page_plate,
                             PaperSheetSize::A4Portrait,
-                            10.0,
+                            self.pub_state.margin_mm,
                         );
                         self.active_dialog = Some(ActiveStrataDialog::TiledPrintPreviewL { plan });
                     }
@@ -1061,16 +1071,25 @@ impl StrataStudioApp {
             }
             "EXP_DXF" => {
                 if let Some(slot) = self.slots.get(self.selected_slot_idx) {
-                    let (wysiwyg_plate, _) = crate::sheet_pane::build_wysiwyg_exported_plate(
+                    if self.pub_state.auto_fitted_slot_title != slot.composed_plate.title {
+                        self.pub_state
+                            .auto_fit_to_paper(&slot.measurements, &slot.composed_plate.title);
+                    }
+                    let comp = publication_tab::compose_publication_page_plate(
                         &slot.composed_plate,
+                        &slot.measurements,
+                        slot.source_path.as_deref(),
                         &self.sheet_state,
+                        &self.pub_state,
                     );
                     let out_path = rfd::FileDialog::new()
                         .add_filter("AutoCAD R12 도판 (.dxf)", &["dxf"])
-                        .set_file_name("strata_plate_r12.dxf")
+                        .set_file_name("strata_publication_plate.dxf")
                         .save_file()
-                        .unwrap_or_else(|| std::env::temp_dir().join("strata_plate_r12.dxf"));
-                    let dxf = strata_export::export_plate_to_dxf_r12(&wysiwyg_plate);
+                        .unwrap_or_else(|| {
+                            std::env::temp_dir().join("strata_publication_plate.dxf")
+                        });
+                    let dxf = strata_export::export_plate_to_dxf_r12(&comp.page_plate);
                     if std::fs::write(&out_path, dxf.as_bytes()).is_ok() {
                         self.status_message = format!(
                             "AutoCAD R12 DXF($INSUNITS=4 mm) 저장 완료: {}",
@@ -1081,71 +1100,34 @@ impl StrataStudioApp {
             }
             "EXP_SVG" => {
                 if let Some(slot) = self.slots.get(self.selected_slot_idx) {
-                    let (wysiwyg_plate, rubbing_slots) =
-                        crate::sheet_pane::build_wysiwyg_exported_plate(
-                            &slot.composed_plate,
-                            &self.sheet_state,
-                        );
-                    let out_path = rfd::FileDialog::new()
-                        .add_filter("Adobe Illustrator 레이어 도판 (.svg)", &["svg"])
-                        .set_file_name("strata_cutline_rc0.svg")
-                        .save_file()
-                        .unwrap_or_else(|| std::env::temp_dir().join("strata_cutline_rc0.svg"));
-                    // 탁본 출처(광원·파라미터·전개모드)를 SVG 메타데이터에 각인해 재현 근거를 남긴다.
-                    let provenance = crate::sheet_pane::rubbing_provenance_line(
-                        &self.sheet_state.rubbing_params,
+                    if self.pub_state.auto_fitted_slot_title != slot.composed_plate.title {
+                        self.pub_state
+                            .auto_fit_to_paper(&slot.measurements, &slot.composed_plate.title);
+                    }
+                    let comp = publication_tab::compose_publication_page_plate(
+                        &slot.composed_plate,
+                        &slot.measurements,
+                        slot.source_path.as_deref(),
+                        &self.sheet_state,
+                        &self.pub_state,
                     );
-                    // 스캔 옆 동반 사진(`{stem}_1.jpg` 등)을 도판 사진 슬롯으로 자동 배치한다.
-                    let mut photo_paths: Vec<std::path::PathBuf> = Vec::new();
-                    if let Some(src) = slot.source_path.as_ref() {
-                        if let (Some(dir), Some(stem)) =
-                            (src.parent(), src.file_stem().and_then(|s| s.to_str()))
-                        {
-                            for ext in ["jpg", "jpeg", "png", "webp"] {
-                                let cand = dir.join(format!("{stem}_1.{ext}"));
-                                if cand.is_file() {
-                                    photo_paths.push(cand);
-                                    break;
-                                }
-                            }
-                            for ext in ["jpg", "jpeg", "png", "webp"] {
-                                let cand = dir.join(format!("{stem}_2.{ext}"));
-                                if cand.is_file() {
-                                    photo_paths.push(cand);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    let cw = wysiwyg_plate.canvas_width_mm;
-                    let ch = wysiwyg_plate.canvas_height_mm;
-                    let margin = cw * 0.08;
-                    let gap = cw * 0.04;
-                    let band_h = ch * 0.16;
-                    let y0 = ch * 0.26;
-                    let slot_w = (cw - margin * 2.0 - gap) * 0.5;
-                    let rects = [
-                        [margin, y0, margin + slot_w, y0 + band_h],
-                        [margin + slot_w + gap, y0, cw - margin, y0 + band_h],
-                    ];
-                    let mut photo_slots = Vec::new();
-                    for (i, p) in photo_paths.iter().take(2).enumerate() {
-                        photo_slots.push(strata_export::PhotoSlot {
-                            rect_mm: rects[i],
-                            path: p.as_path(),
+                    let out_path = rfd::FileDialog::new()
+                        .add_filter("Adobe Illustrator 조판 도판 (.svg)", &["svg"])
+                        .set_file_name("strata_publication_plate.svg")
+                        .save_file()
+                        .unwrap_or_else(|| {
+                            std::env::temp_dir().join("strata_publication_plate.svg")
                         });
-                    }
-                    let svg =
-                        strata_export::render_plate_to_illustrator_svg_with_rubbings_and_photos(
-                            &wysiwyg_plate,
-                            &provenance,
-                            true,
-                            &photo_slots,
-                            &rubbing_slots,
-                        );
+                    let svg = publication_tab::export_publication_page_to_svg(
+                        &comp,
+                        &self.sheet_state,
+                        self.pub_state.show_1cm_grid,
+                    );
                     if std::fs::write(&out_path, svg.as_bytes()).is_ok() {
-                        self.status_message =
-                            format!("1mm=5px SVG 제도선 저장 완료: {}", out_path.display());
+                        self.status_message = format!(
+                            "출판 조판 SVG(10레이어·3차베지어) 저장 완료: {}",
+                            out_path.display()
+                        );
                     }
                 }
             }
@@ -1369,6 +1351,53 @@ impl eframe::App for StrataStudioApp {
                     }
                     ui.separator();
 
+                    // 2-탭 분리 아키텍처 전환 버튼 (① 1:1 실측 작업대 ↔ ② 출판 조판 · 일러스트 내보내기)
+                    let is_pub_tab = self.active_tab == WorkflowTab::Step4PlateAndExport;
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("📐 ① 1:1 실측·탁본")
+                                    .size(11.0)
+                                    .strong()
+                                    .color(if !is_pub_tab {
+                                        egui::Color32::WHITE
+                                    } else {
+                                        ink
+                                    }),
+                            )
+                            .fill(if !is_pub_tab { terra } else { wash })
+                            .corner_radius(4.0),
+                        )
+                        .on_hover_text("무한 방안지 위 1:1 실제 크기(1cm=10mm) 실측·단면·정밀탁본 추출 작업대")
+                        .clicked()
+                    {
+                        self.active_tab = WorkflowTab::Step1LoadAndClassify;
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("📄 ② 출판 조판·내보내기")
+                                    .size(11.0)
+                                    .strong()
+                                    .color(if is_pub_tab {
+                                        egui::Color32::WHITE
+                                    } else {
+                                        terra
+                                    }),
+                            )
+                            .fill(if is_pub_tab { terra } else { clay_wash })
+                            .stroke(egui::Stroke::new(1.0_f32, terra))
+                            .corner_radius(4.0),
+                        )
+                        .on_hover_text(
+                            "『유물 편집판.ai / 유물제도선.ai』 규격 용지·축척 조판 및 Adobe Illustrator(.svg/.ai)·PDF·DXF 내보내기 전용 탭",
+                        )
+                        .clicked()
+                    {
+                        self.active_tab = WorkflowTab::Step4PlateAndExport;
+                    }
+                    ui.separator();
+
                     // D4: 부분탁본 토글 및 GPU/FPS 배지는 도판 상단 바(sheet_pane)에 단일 배치하여 중복을 제거한다.
                     if ui
                         .selectable_label(self.sheet_state.show_roi_rubbing_window, "탁본창")
@@ -1448,7 +1477,13 @@ impl eframe::App for StrataStudioApp {
         self.sheet_state.dark_mode = self.dark_mode;
         show_active_dialog(ctx, &mut self.active_dialog, self.dark_mode);
 
+        if self.sheet_state.request_switch_to_pub_tab {
+            self.sheet_state.request_switch_to_pub_tab = false;
+            self.active_tab = WorkflowTab::Step4PlateAndExport;
+        }
+
         // 전체 화면 폭·높이를 최대한 확장하여 3D(직상방 동심원 방안지 + 정면 스캐너 입면)와 2D 실측 방안지로 배분!
+        let mut deferred_pub_action: Option<&'static str> = None;
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(hanji).inner_margin(4.0))
             .show(ctx, |ui| {
@@ -1461,6 +1496,19 @@ impl eframe::App for StrataStudioApp {
                 let _ = ScalePreset::Full1To1;
 
                 if let Some(slot) = self.slots.get_mut(self.selected_slot_idx) {
+                    if self.active_tab == WorkflowTab::Step4PlateAndExport {
+                        deferred_pub_action = publication_tab::render_publication_tab_egui(
+                            ui,
+                            &slot.composed_plate,
+                            &slot.measurements,
+                            &slot.mesh,
+                            slot.source_path.as_deref(),
+                            &mut self.sheet_state,
+                            &mut self.pub_state,
+                            &mut self.status_message,
+                        );
+                        return;
+                    }
                     let avail_h = ui.available_height().max(200.0);
                     let total_w = ui.available_width().max(560.0);
                     let _ = geom.view3d_w;
@@ -1617,6 +1665,13 @@ impl eframe::App for StrataStudioApp {
                     }
                 }
             });
+        if let Some(act) = deferred_pub_action {
+            if act == "GOTO_TAB1" {
+                self.active_tab = WorkflowTab::Step1LoadAndClassify;
+            } else {
+                self.handle_tile_click(act);
+            }
+        }
 
         // 저장 경로 자동 검증 (`--save-project <path>`): 창이 뜬 뒤 현재 상태를 저장하고 종료
         if let Some(path) = self.save_project_path.clone() {

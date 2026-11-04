@@ -59,7 +59,7 @@ pub fn run_autonomous_self_audit() -> Vec<SelfAuditGateResult> {
     slot.rebuild_plate(false, &view3d_state);
 
     let mut sheet_state = SheetPaneState::default();
-    let mut results = Vec::with_capacity(20);
+    let mut results = Vec::with_capacity(22);
 
     // 1. A1 ~ A5: 완형 토기 고고학 실측·기하 무결성 감사
     results.push(audit_a1_single_outer_wall_contour(&slot.composed_plate));
@@ -81,19 +81,21 @@ pub fn run_autonomous_self_audit() -> Vec<SelfAuditGateResult> {
     results.push(a9);
     results.push(a10);
 
-    // 2. D1 ~ D4: UI 디자인·레이아웃·바운딩 박스 충돌 감사
-    let (d1, d2, d3, d4, _d5) =
-        audit_d1_to_d5_layout_and_ui(&slot, &view3d_state, &mut sheet_state);
-    results.push(d1);
-    results.push(d2);
-    results.push(d3);
-    results.push(d4);
+    // 2. L1 ~ L5: 탭 2 출판 조판 페이지(A4 세로 『유물 편집판.ai』 규격) 감사
+    let (l1, l2, l3, l4, l5) =
+        audit_l1_to_l5_publication_page(&slot, &view3d_state, &mut sheet_state);
+    results.push(l1);
+    results.push(l2);
+    results.push(l3);
+    results.push(l4);
+    results.push(l5);
 
-    // 3. E1 ~ E3: 『유물 편집판.ai / 유물제도선.ai』 일러스트레이터 내보내기 감사
-    let (e1, e2, e3) = audit_e1_to_e3_illustrator_export(&slot, &sheet_state);
+    // 3. E1 ~ E4: 『유물 편집판.ai / 유물제도선.ai』 일러스트레이터 조판 내보내기 감사
+    let (e1, e2, e3, e4) = audit_e1_to_e4_illustrator_export(&slot, &sheet_state);
     results.push(e1);
     results.push(e2);
     results.push(e3);
+    results.push(e4);
 
     // 4. P1 ~ P3: 렌더링 성능·캐시·피벗 회전 무공전 감사
     let (p1, p2, p3, _p4) =
@@ -261,10 +263,160 @@ fn audit_a6_to_a10_potsherd_and_extension_ticks(
     (a6, a7, a8, a9, a10)
 }
 
-fn audit_e1_to_e3_illustrator_export(
+fn audit_l1_to_l5_publication_page(
+    slot: &ArtifactSlotEntry,
+    view3d_state: &View3DPaneState,
+    sheet_state: &mut SheetPaneState,
+) -> (
+    SelfAuditGateResult,
+    SelfAuditGateResult,
+    SelfAuditGateResult,
+    SelfAuditGateResult,
+    SelfAuditGateResult,
+) {
+    let (_d1, d2, d3, d4, _d5) = audit_d1_to_d5_layout_and_ui(slot, view3d_state, sheet_state);
+    let main_src = include_str!("main.rs");
+    let has_tab_buttons = main_src.contains("📐 ① 1:1 실측·탁본")
+        && main_src.contains("📄 ② 출판 조판·내보내기")
+        && d3.passed
+        && d4.passed;
+    let l1 = SelfAuditGateResult {
+        gate_id: "L1",
+        category: "Layout",
+        title: "2-탭 분리(① 1:1 실측 작업대 ↔ ② 출판 조판·내보내기 전용 탭) 전환 감사",
+        passed: has_tab_buttons,
+        detail: format!(
+            "탭1/탭2 전용 전환 버튼 활성={has_tab_buttons}, 플로팅위젯·상단바 중복무결성={}",
+            d3.passed && d4.passed
+        ),
+    };
+
+    let mut pub_state = crate::publication_tab::PublicationLayoutState::default();
+    pub_state.auto_fit_to_paper(&slot.measurements, &slot.composed_plate.title);
+    let comp = crate::publication_tab::compose_publication_page_plate(
+        &slot.composed_plate,
+        &slot.measurements,
+        slot.source_path.as_deref(),
+        sheet_state,
+        &pub_state,
+    );
+    let l2 = SelfAuditGateResult {
+        gate_id: "L2",
+        category: "Layout",
+        title: "출판 조판 용지(A4 세로 210×297mm) 판면 내부 여백(>=8.0mm) 100% 수용 감사",
+        passed: comp.fits_on_paper && comp.min_paper_margin_mm >= 8.0,
+        detail: format!(
+            "용지={} (210×297mm), 최적축척={}, fits_on_paper={}, 최소여백={:.1}mm (>=8.0mm)",
+            pub_state.paper_preset.label_kr(),
+            pub_state.pub_scale.label(),
+            comp.fits_on_paper,
+            comp.min_paper_margin_mm
+        ),
+    };
+
+    // L3: 조판 요소 간 AABB 겹침 면적 0.0 mm² 감사
+    let mut overlap_mm2 = 0.0_f64;
+    let mut pair_msg = String::new();
+    for i in 0..comp.group_rects_mm.len() {
+        for j in (i + 1)..comp.group_rects_mm.len() {
+            let (na, [ax0, ay0, ax1, ay1]) = comp.group_rects_mm[i];
+            let (nb, [bx0, by0, bx1, by1]) = comp.group_rects_mm[j];
+            let ix0 = ax0.min(ax1).max(bx0.min(bx1));
+            let iy0 = ay0.min(ay1).max(by0.min(by1));
+            let ix1 = ax0.max(ax1).min(bx0.max(bx1));
+            let iy1 = ay0.max(ay1).min(by0.max(by1));
+            if ix1 > ix0 && iy1 > iy0 {
+                let area = (ix1 - ix0) * (iy1 - iy0);
+                if area > 0.5 {
+                    overlap_mm2 += area;
+                    pair_msg.push_str(&format!("{na}↔{nb}({area:.1}mm²) "));
+                }
+            }
+        }
+    }
+    let l3 = SelfAuditGateResult {
+        gate_id: "L3",
+        category: "Layout",
+        title:
+            "출판 조판 7대 요소(평면·단면·탁본·횡단면·축척자·사진1/2·유물번호) AABB 충돌 제로 감사",
+        passed: overlap_mm2 == 0.0,
+        detail: if overlap_mm2 == 0.0 {
+            format!(
+                "조판 그룹 {}개 간 AABB 교집합 면적 0.0mm² (겹침 0건)",
+                comp.group_rects_mm.len()
+            )
+        } else {
+            format!("조판 그룹 겹침 발견({overlap_mm2:.1}mm²): {pair_msg}")
+        },
+    };
+
+    // L4: 축척 변경(1/1, 1/2, 1/3) 시 도면 크기와 축척 막대 동기화 감사
+    let mut scale_sync_ok = true;
+    for sc in [
+        ScalePreset::Full1To1,
+        ScalePreset::Half1To2,
+        ScalePreset::Third1To3,
+    ] {
+        let mut ps = pub_state.clone();
+        ps.pub_scale = sc;
+        let c_sc = crate::publication_tab::compose_publication_page_plate(
+            &slot.composed_plate,
+            &slot.measurements,
+            slot.source_path.as_deref(),
+            sheet_state,
+            &ps,
+        );
+        let (expected_bar_mm, expected_mid, expected_end) =
+            crate::publication_tab::publication_scale_bar_spec(sc);
+        let bar_ok = c_sc
+            .page_plate
+            .paths
+            .iter()
+            .find(|p| p.layer_id == "치수_축척막대")
+            .is_some_and(|p| {
+                let w = (p.points_mm[1][0] - p.points_mm[0][0]).abs();
+                (w - expected_bar_mm).abs() <= 0.05
+            });
+        let lbl_ok = c_sc
+            .page_plate
+            .callouts
+            .iter()
+            .any(|c| c.text == expected_mid)
+            && c_sc
+                .page_plate
+                .callouts
+                .iter()
+                .any(|c| c.text == expected_end);
+        if !bar_ok || !lbl_ok {
+            scale_sync_ok = false;
+        }
+    }
+    let l4 = SelfAuditGateResult {
+        gate_id: "L4",
+        category: "Layout",
+        title: "출판 축척 변경(1/1 · 1/2 · 1/3) 시 도면 크기 및 축척 막대 100% 동기화 감사",
+        passed: scale_sync_ok,
+        detail: format!(
+            "1/1(50mm·5cm), 1/2(25mm·5cm(1/2)), 1/3(33.3mm·10cm(1/3)) 도면·축척자 동기화={scale_sync_ok}"
+        ),
+    };
+
+    let l5 = SelfAuditGateResult {
+        gate_id: "L5",
+        category: "Layout",
+        title: "축척 막대 내부 조립 위계(라벨<눈금<기선<바디) 및 토기 바닥 이격 감사",
+        passed: d2.passed,
+        detail: d2.detail,
+    };
+
+    (l1, l2, l3, l4, l5)
+}
+
+fn audit_e1_to_e4_illustrator_export(
     slot: &ArtifactSlotEntry,
     sheet_state: &SheetPaneState,
 ) -> (
+    SelfAuditGateResult,
     SelfAuditGateResult,
     SelfAuditGateResult,
     SelfAuditGateResult,
@@ -274,46 +426,48 @@ fn audit_e1_to_e3_illustrator_export(
     mod_state.custom_artifact_memo = String::from("유물재질, 결실부분 확인요함");
     mod_state.line_style.section_width_mm = 0.80;
 
-    let (wysiwyg_plate, mut rubbing_slots) =
-        crate::sheet_pane::build_wysiwyg_exported_plate(&slot.composed_plate, &mod_state);
-    if rubbing_slots.is_empty() {
-        rubbing_slots.push(strata_export::RubbingPngSlot {
-            id: String::from("정밀탁본_래스터"),
-            rect_mm: [180.0, 130.0, 300.0, 250.0],
-            png_bytes: vec![
-                0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-            ],
-        });
-    }
-    let provenance = crate::sheet_pane::rubbing_provenance_line(&mod_state.rubbing_params);
-    let svg = strata_export::render_plate_to_illustrator_svg_with_rubbings_and_photos(
-        &wysiwyg_plate,
-        &provenance,
-        true,
-        &[],
-        &rubbing_slots,
+    let mut pub_state = crate::publication_tab::PublicationLayoutState::default();
+    pub_state.auto_fit_to_paper(&slot.measurements, &slot.composed_plate.title);
+    let comp = crate::publication_tab::compose_publication_page_plate(
+        &slot.composed_plate,
+        &slot.measurements,
+        slot.source_path.as_deref(),
+        &mod_state,
+        &pub_state,
     );
+    let svg = crate::publication_tab::export_publication_page_to_svg(&comp, &mod_state, true);
 
-    let main_src = include_str!("main.rs");
-    let has_export_buttons = main_src.contains("\"EXP_SVG\"")
-        && main_src.contains("\"EXP_PDF\"")
-        && main_src.contains("\"EXP_DXF\"")
-        && main_src.contains("\"EXP_RET\"");
+    let (pw, ph) = pub_state.paper_preset.dimensions_mm();
+    let expected_wh = format!(
+        r#"width="{pw:.1}mm" height="{ph:.1}mm" viewBox="0 0 {:.0} {:.0}""#,
+        pw * 5.0,
+        ph * 5.0
+    );
+    let e1_ok = svg.contains(&expected_wh)
+        && (comp.page_plate.canvas_width_mm - pw).abs() <= 0.01
+        && (comp.page_plate.canvas_height_mm - ph).abs() <= 0.01;
+    let e1 = SelfAuditGateResult {
+        gate_id: "E1",
+        category: "Export",
+        title: "출판 조판 용지 치수(210.0×297.0mm) 및 SVG 아트보드 좌표 0.01mm 일치 감사",
+        passed: e1_ok,
+        detail: format!("SVG 아트보드 헤더 일치={e1_ok} ({expected_wh})"),
+    };
+
     let path_tags: Vec<&str> = svg.lines().filter(|l| l.contains("<path ")).collect();
     let cubic_paths = path_tags.iter().filter(|l| l.contains(" C ")).count();
     let raw_l_only_paths = path_tags
         .iter()
         .filter(|l| l.contains(" L ") && !l.contains(" C "))
         .count();
-    let e1_ok =
-        has_export_buttons && !path_tags.is_empty() && raw_l_only_only_zero(raw_l_only_paths);
-    let e1 = SelfAuditGateResult {
-        gate_id: "E1",
+    let e2_ok = !path_tags.is_empty() && raw_l_only_only_zero(raw_l_only_paths);
+    let e2 = SelfAuditGateResult {
+        gate_id: "E2",
         category: "Export",
-        title: "상단 바 내보내기 버튼 활성 및 SVG kurbo 3차 베지어(M...C...) 곡선 출력 감사",
-        passed: e1_ok,
+        title: "SVG 전 실측 곡선 kurbo 3차 베지어(M...C...) 변환 감사 (직선 L 전용 0건)",
+        passed: e2_ok,
         detail: format!(
-            "내보내기버튼={has_export_buttons}, 3차베지어 경로={cubic_paths}/{}개 (단순 직선 L 전용 경로={raw_l_only_paths}건)",
+            "3차 베지어(M...C...) 경로={cubic_paths}/{}개, 단순 직선(L) 전용 경로={raw_l_only_paths}건",
             path_tags.len()
         ),
     };
@@ -327,13 +481,13 @@ fn audit_e1_to_e3_illustrator_export(
         && svg.contains(r#"data-stroke-pt="0.80""#)
         && svg.contains(r#"data-stroke-pt="0.50""#)
         && svg.contains(r#"data-stroke-pt="0.15""#);
-    let e2_ok = missing_groups.is_empty() && weights_ok;
-    let e2 = SelfAuditGateResult {
-        gate_id: "E2",
+    let e3_ok = missing_groups.is_empty() && weights_ok;
+    let e3 = SelfAuditGateResult {
+        gate_id: "E3",
         category: "Export",
         title:
             "『유물제도선.ai / 유물 편집판.ai』 7단계 선 굵기 및 10대 표준 레이어(<g id>) 분리 감사",
-        passed: e2_ok,
+        passed: e3_ok,
         detail: format!(
             "10대 표준 레이어 누락={}건, 7단계 pt/mm 선굵기 메타 확인={weights_ok}",
             missing_groups.len()
@@ -343,18 +497,18 @@ fn audit_e1_to_e3_illustrator_export(
     let has_rubbing_img =
         svg.contains(r#"<g id="03_정밀탁본_래스터">"#) && svg.contains("data:image/png;base64,");
     let has_wysiwyg_edits = svg.contains("000115") && svg.contains("유물재질, 결실부분 확인요함");
-    let e3_ok = has_rubbing_img && has_wysiwyg_edits;
-    let e3 = SelfAuditGateResult {
-        gate_id: "E3",
+    let e4_ok = has_rubbing_img && has_wysiwyg_edits;
+    let e4 = SelfAuditGateResult {
+        gate_id: "E4",
         category: "Export",
-        title: "정밀 탁본 PNG <image> Base64 임베드 및 WYSIWYG 조판·메모 반영 감사",
-        passed: e3_ok,
+        title: "정밀 탁본 PNG <image> Base64 임베드 및 유물번호·실측메모 WYSIWYG 반영 감사",
+        passed: e4_ok,
         detail: format!(
             "03_정밀탁본_래스터 Base64 PNG 임베드={has_rubbing_img}, 유물번호(000115)·실측메모 반영={has_wysiwyg_edits}"
         ),
     };
 
-    (e1, e2, e3)
+    (e1, e2, e3, e4)
 }
 
 #[inline]
@@ -1167,8 +1321,8 @@ mod tests {
         let results = run_autonomous_self_audit();
         assert_eq!(
             results.len(),
-            20,
-            "Must evaluate all 20 self-audit gates (A1~A10, D1~D4, E1~E3, P1~P3)"
+            22,
+            "Must evaluate all 22 self-audit gates (A1~A10, L1~L5, E1~E4, P1~P3)"
         );
         for r in &results {
             assert!(

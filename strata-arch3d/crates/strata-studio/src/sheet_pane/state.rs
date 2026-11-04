@@ -53,6 +53,8 @@ pub struct SheetPaneState {
     pub custom_artifact_number: String,
     /// 『유물 편집판.ai』 하단 실측 확인 메모 (예: `유물재질, 결실부분 확인요함`)
     pub custom_artifact_memo: String,
+    /// 탭 1 상단 바에서 `[📄 출판 조판·내보내기 탭 →]` 클릭 시 탭 2 전환 요청 플래그
+    pub request_switch_to_pub_tab: bool,
 }
 
 impl std::fmt::Debug for SheetPaneState {
@@ -109,6 +111,7 @@ impl Default for SheetPaneState {
             dark_mode: false,
             custom_artifact_number: String::new(),
             custom_artifact_memo: String::new(),
+            request_switch_to_pub_tab: false,
         }
     }
 }

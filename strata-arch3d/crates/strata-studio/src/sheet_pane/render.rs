@@ -224,16 +224,16 @@ pub fn render_sheet_pane_egui(
         );
         let p_rect = spec.paper_bounds_rect;
         let paper_scale = spec.scale_px_per_mm;
-        // 대형 유물: 1:1 도판이 용지보다 크면 자동으로 축척을 낮춘다(사용자가 직접 선택하면 고정).
+        // 탭 1 (`1:1 실측 · 탁본 작업대`): 강제 1/2·1/3 축소 없이 무조건 1:1 실제 크기(1cm = 10mm) 고정!
         if !state.scale_locked {
-            let (pw, ph) = state.paper_preset.dimensions_mm();
-            state.active_scale_preset = fit_scale_preset(
+            let _ = fit_scale_preset(
                 plate.canvas_width_mm,
                 plate.canvas_height_mm,
-                pw,
-                ph,
+                420.0,
+                297.0,
                 12.0,
             );
+            state.active_scale_preset = ScalePreset::Full1To1;
         }
         let scale_factor = (state.active_scale_preset.ratio() as f32).clamp(0.2, 5.0);
         let scale = paper_scale * scale_factor;
@@ -1528,27 +1528,27 @@ pub fn render_sheet_pane_egui(
         bar_ui.style_mut().visuals = egui::Visuals::light();
         bar_ui.spacing_mut().item_spacing.x = 4.0;
 
-        bar_ui.label(egui::RichText::new("■ 조판용지:").size(9.5).strong().color(terra));
-        for (preset, icon_lbl) in [
-            (PaperSheetPreset::A3Landscape, "■ A3가로"),
-            (PaperSheetPreset::A4Landscape, "■ A4가로"),
-            (PaperSheetPreset::A4Portrait, "□ A4세로"),
-            (PaperSheetPreset::B4Portrait, "□ B4세로"),
-            (PaperSheetPreset::B5Portrait, "□ B5세로"),
-        ] {
-            let is_sel = state.paper_preset == preset;
-            let btn = egui::Button::new(
-                egui::RichText::new(icon_lbl)
-                    .size(9.2)
-                    .strong()
-                    .color(if is_sel { paper } else { ink }),
+        bar_ui.label(
+            egui::RichText::new("📐 1:1 실측 작업대 (1cm=10mm)")
+                .size(9.5)
+                .strong()
+                .color(ink),
+        );
+        if bar_ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("📄 ② 출판 조판 · 내보내기 탭 →")
+                        .size(9.4)
+                        .strong()
+                        .color(paper),
+                )
+                .fill(terra)
+                .stroke(egui::Stroke::new(1.0_f32, terra))
+                .corner_radius(3.5),
             )
-            .fill(if is_sel { terra } else { wash })
-            .stroke(egui::Stroke::new(1.0_f32, if is_sel { terra } else { border }))
-            .corner_radius(3.5);
-            if bar_ui.add(btn).clicked() {
-                state.paper_preset = preset;
-            }
+            .clicked()
+        {
+            state.request_switch_to_pub_tab = true;
         }
         bar_ui.separator();
 

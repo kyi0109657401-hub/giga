@@ -691,6 +691,7 @@ pub(crate) type SheetRubbingCacheKey = (
 
 /// 화면(`SheetPaneState`)에서 편집된 레이어 가시성·이동·회전(`view_transforms`), 선 굵기·색상(`line_style`),
 /// 단면 채움 모드, 유물번호/메모, 그리고 캐시된 정밀 탁본 PNG 이미지를 그대로 반영한 WYSIWYG 내보내기용 도판을 생성한다 (`Task 1-2` & `E3`).
+#[allow(dead_code)]
 pub fn build_wysiwyg_exported_plate(
     plate: &strata_export::ComposedPlate2D,
     state: &super::state::SheetPaneState,
