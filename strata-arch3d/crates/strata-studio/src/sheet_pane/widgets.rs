@@ -247,7 +247,13 @@ pub(crate) fn draw_individual_view_flip_controls(
     if grip_resp.dragged() {
         let sc = scale_px_per_mm.max(0.5);
         let d = grip_resp.drag_delta();
-        transform.translate_mm(f64::from(d.x / sc), f64::from(-d.y / sc));
+        // Task 1-3(4): 평면도(layer_idx == 0)는 정면·단면도의 수직 중심축(X = cx)에 스냅 잠금(dx = 0)하여 수직 간격만 조절되게 한다.
+        let dx_mm = if layer_idx == 0 {
+            0.0
+        } else {
+            f64::from(d.x / sc)
+        };
+        transform.translate_mm(dx_mm, f64::from(-d.y / sc));
     }
     painter.rect_filled(
         grip_rect,

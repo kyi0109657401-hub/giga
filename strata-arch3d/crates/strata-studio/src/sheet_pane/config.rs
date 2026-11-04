@@ -135,6 +135,8 @@ impl AcademicRubbingParams {
 pub struct PlateLineStyleConfig {
     /// Image 11: 단면을 검게 채우지 않고 선(외곽선)으로만 표시 (`기본값 = false`)
     pub fill_section_solid: bool,
+    /// 『유물 편집판.ai』 단면 45° 빗금 해칭(`0.15pt`) 표시 여부 (`기본값 = true`)
+    pub show_hatch_lines: bool,
     /// 수직 단면선 굵기 (`mm`, 기본 `0.40mm`)
     pub section_width_mm: f32,
     /// 수직 단면선 색상 (`RGB`, 기본 `#141413` 먹색)
@@ -157,6 +159,7 @@ impl Default for PlateLineStyleConfig {
     fn default() -> Self {
         Self {
             fill_section_solid: false, // Image 11: "검게 나오게 하지말고 선으로 나와야한다" -> 기본값 선(Outline) 모드!
+            show_hatch_lines: true,
             // 「유물제도선.ai」 규격(0.12/0.15/0.2/0.3/0.4/0.5/0.8)에 맞춘 기본 위계
             section_width_mm: 0.40,
             section_color_rgb: [20, 20, 19],
@@ -685,3 +688,167 @@ pub(crate) type SheetRubbingCacheKey = (
         Option<strata_shade::UnrollMode>,
     ),
 );
+
+/// 화면(`SheetPaneState`)에서 편집된 레이어 가시성·이동·회전(`view_transforms`), 선 굵기·색상(`line_style`),
+/// 단면 채움 모드, 유물번호/메모, 그리고 캐시된 정밀 탁본 PNG 이미지를 그대로 반영한 WYSIWYG 내보내기용 도판을 생성한다 (`Task 1-2` & `E3`).
+pub fn build_wysiwyg_exported_plate(
+    plate: &strata_export::ComposedPlate2D,
+    state: &super::state::SheetPaneState,
+) -> (
+    strata_export::ComposedPlate2D,
+    Vec<strata_export::RubbingPngSlot>,
+) {
+    let mut out = plate.clone();
+    out.scale_preset = state.active_scale_preset;
+    let centers = compute_sheet_layer_centers_mm(plate);
+
+    let rgb_hex =
+        |rgb: [u8; 3]| -> String { format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]) };
+    let sec_hex = rgb_hex(state.line_style.section_color_rgb);
+    let out_hex = rgb_hex(state.line_style.outer_color_rgb);
+    let aux_hex = rgb_hex(state.line_style.aux_color_rgb);
+    let dim_hex = rgb_hex(state.line_style.dim_color_rgb);
+
+    let mut filtered_paths = Vec::with_capacity(plate.paths.len());
+    for elem in &plate.paths {
+        if elem.layer_id == "단면_해칭" && !state.line_style.show_hatch_lines {
+            continue;
+        }
+        let v_idx = classify_plate_path_layer_idx(&elem.layer_id);
+        let vtf = state.view_transforms[v_idx];
+        if !vtf.visible {
+            continue;
+        }
+        let is_scale_bar = elem.layer_id == "치수_축척막대"
+            || elem.layer_id == "치수_축척바디"
+            || elem.layer_id == "치수_축척눈금"
+            || elem.layer_id == "축척자_5cm";
+        let mut new_elem = elem.clone();
+        if !is_scale_bar
+            && (vtf.rot_90_steps != 0
+                || vtf.flip_forward_steps != 0
+                || vtf.offset_mm_x_tenths != 0
+                || vtf.offset_mm_y_tenths != 0)
+        {
+            new_elem.points_mm = elem
+                .points_mm
+                .iter()
+                .map(|&p| vtf.transform_point_around(p, centers[v_idx]))
+                .collect();
+        }
+        if elem.layer_id.contains("단면_실선") {
+            new_elem.stroke_width_mm = f64::from(snap_to_standard_weight_mm(
+                state.line_style.section_width_mm,
+            ));
+            new_elem.stroke_hex.clone_from(&sec_hex);
+            new_elem.fill_hex = if state.line_style.fill_section_solid {
+                Some(sec_hex.clone())
+            } else {
+                None
+            };
+        } else if elem.layer_id.contains("외곽선")
+            || elem.layer_id.contains("구경")
+            || elem.layer_id.contains("저경")
+        {
+            new_elem.stroke_width_mm =
+                f64::from(snap_to_standard_weight_mm(state.line_style.outer_width_mm));
+            new_elem.stroke_hex.clone_from(&out_hex);
+        } else if elem.layer_id.contains("횡단면")
+            || elem.layer_id.contains("중심")
+            || elem.layer_id.contains("십자선")
+        {
+            new_elem.stroke_width_mm =
+                f64::from(snap_to_standard_weight_mm(state.line_style.aux_width_mm));
+            new_elem.stroke_hex.clone_from(&aux_hex);
+            if elem.layer_id.contains("횡단면_단면") {
+                new_elem.fill_hex = if state.line_style.fill_section_solid {
+                    Some(sec_hex.clone())
+                } else {
+                    None
+                };
+            }
+        }
+        filtered_paths.push(new_elem);
+    }
+    out.paths = filtered_paths;
+
+    let mut filtered_callouts = Vec::with_capacity(plate.callouts.len());
+    for c in &plate.callouts {
+        let c_layer = if c.text.contains("추가 단면") {
+            4usize
+        } else if c.text.contains("평면도") {
+            0usize
+        } else if c.text.contains("탁본") {
+            2usize
+        } else if c.text.contains("수평 횡단면") {
+            3usize
+        } else {
+            5usize
+        };
+        if !state.view_transforms[c_layer].visible {
+            continue;
+        }
+        let off = state.view_transforms[c_layer].offset_mm();
+        let mut nc = c.clone();
+        nc.pos_mm = [c.pos_mm[0] + off[0], c.pos_mm[1] + off[1]];
+        if nc.layer_id == "유물번호" && !state.custom_artifact_number.trim().is_empty() {
+            nc.text = state.custom_artifact_number.trim().to_string();
+        } else if nc.layer_id == "유물캡션" && !state.custom_artifact_memo.trim().is_empty() {
+            nc.text = state.custom_artifact_memo.trim().to_string();
+        } else if nc.color_hex == "#141413" {
+            nc.color_hex.clone_from(&dim_hex);
+        }
+        filtered_callouts.push(nc);
+    }
+    if !state.custom_artifact_memo.trim().is_empty()
+        && !filtered_callouts.iter().any(|c| c.layer_id == "유물캡션")
+    {
+        filtered_callouts.push(strata_export::PlateTextCallout {
+            layer_id: String::from("유물캡션"),
+            pos_mm: [centers[1][0] - 20.0, 4.5],
+            text: state.custom_artifact_memo.trim().to_string(),
+            font_size_pt: 8.5,
+            color_hex: dim_hex,
+        });
+    }
+    out.callouts = filtered_callouts;
+
+    let mut rubbing_slots = Vec::new();
+    if state.view_transforms[2].visible {
+        if let Some(reg) = plate
+            .raster_regions
+            .iter()
+            .find(|r| r.kind == strata_export::PlateRasterKind::BottomPlanRubbing)
+            .or_else(|| plate.raster_regions.first())
+        {
+            let off = state.view_transforms[2].offset_mm();
+            let rect_mm = [
+                reg.rect_mm[0] + off[0],
+                reg.rect_mm[1] + off[1],
+                reg.rect_mm[2] + off[0],
+                reg.rect_mm[3] + off[1],
+            ];
+            let png_bytes = state
+                .cached_bottom_img
+                .as_ref()
+                .or(state.cached_front_img.as_ref())
+                .and_then(|img| {
+                    let mut buf = std::io::Cursor::new(Vec::new());
+                    image::DynamicImage::ImageRgba8(img.clone())
+                        .write_to(&mut buf, image::ImageFormat::Png)
+                        .ok()
+                        .map(|()| buf.into_inner())
+                })
+                .unwrap_or_default();
+            if !png_bytes.is_empty() {
+                rubbing_slots.push(strata_export::RubbingPngSlot {
+                    id: String::from("정밀탁본_래스터"),
+                    rect_mm,
+                    png_bytes,
+                });
+            }
+        }
+    }
+
+    (out, rubbing_slots)
+}

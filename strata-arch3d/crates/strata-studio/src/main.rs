@@ -1031,13 +1031,17 @@ impl StrataStudioApp {
             }
             "EXP_PDF" => {
                 if let Some(slot) = self.slots.get(self.selected_slot_idx) {
+                    let (wysiwyg_plate, _) = crate::sheet_pane::build_wysiwyg_exported_plate(
+                        &slot.composed_plate,
+                        &self.sheet_state,
+                    );
                     if let Some(out_path) = rfd::FileDialog::new()
                         .add_filter("1:1 분할 인쇄 도판 (.pdf)", &["pdf"])
                         .set_file_name("strata_plate_1to1.pdf")
                         .save_file()
                     {
                         let pdf_bytes = render_plate_to_pdf_bytes(
-                            &slot.composed_plate,
+                            &wysiwyg_plate,
                             PaperSheetSize::A4Portrait,
                             10.0,
                         );
@@ -1047,7 +1051,7 @@ impl StrataStudioApp {
                         }
                     } else {
                         let plan = compute_tiled_print_plan(
-                            &slot.composed_plate,
+                            &wysiwyg_plate,
                             PaperSheetSize::A4Portrait,
                             10.0,
                         );
@@ -1057,12 +1061,16 @@ impl StrataStudioApp {
             }
             "EXP_DXF" => {
                 if let Some(slot) = self.slots.get(self.selected_slot_idx) {
+                    let (wysiwyg_plate, _) = crate::sheet_pane::build_wysiwyg_exported_plate(
+                        &slot.composed_plate,
+                        &self.sheet_state,
+                    );
                     let out_path = rfd::FileDialog::new()
                         .add_filter("AutoCAD R12 도판 (.dxf)", &["dxf"])
                         .set_file_name("strata_plate_r12.dxf")
                         .save_file()
                         .unwrap_or_else(|| std::env::temp_dir().join("strata_plate_r12.dxf"));
-                    let dxf = strata_export::export_plate_to_dxf_r12(&slot.composed_plate);
+                    let dxf = strata_export::export_plate_to_dxf_r12(&wysiwyg_plate);
                     if std::fs::write(&out_path, dxf.as_bytes()).is_ok() {
                         self.status_message = format!(
                             "AutoCAD R12 DXF($INSUNITS=4 mm) 저장 완료: {}",
@@ -1073,6 +1081,11 @@ impl StrataStudioApp {
             }
             "EXP_SVG" => {
                 if let Some(slot) = self.slots.get(self.selected_slot_idx) {
+                    let (wysiwyg_plate, rubbing_slots) =
+                        crate::sheet_pane::build_wysiwyg_exported_plate(
+                            &slot.composed_plate,
+                            &self.sheet_state,
+                        );
                     let out_path = rfd::FileDialog::new()
                         .add_filter("Adobe Illustrator 레이어 도판 (.svg)", &["svg"])
                         .set_file_name("strata_cutline_rc0.svg")
@@ -1104,8 +1117,8 @@ impl StrataStudioApp {
                             }
                         }
                     }
-                    let cw = slot.composed_plate.canvas_width_mm;
-                    let ch = slot.composed_plate.canvas_height_mm;
+                    let cw = wysiwyg_plate.canvas_width_mm;
+                    let ch = wysiwyg_plate.canvas_height_mm;
                     let margin = cw * 0.08;
                     let gap = cw * 0.04;
                     let band_h = ch * 0.16;
@@ -1122,12 +1135,14 @@ impl StrataStudioApp {
                             path: p.as_path(),
                         });
                     }
-                    let svg = strata_export::render_plate_to_illustrator_svg_with_photos(
-                        &slot.composed_plate,
-                        &provenance,
-                        true,
-                        &photo_slots,
-                    );
+                    let svg =
+                        strata_export::render_plate_to_illustrator_svg_with_rubbings_and_photos(
+                            &wysiwyg_plate,
+                            &provenance,
+                            true,
+                            &photo_slots,
+                            &rubbing_slots,
+                        );
                     if std::fs::write(&out_path, svg.as_bytes()).is_ok() {
                         self.status_message =
                             format!("1mm=5px SVG 제도선 저장 완료: {}", out_path.display());
@@ -1219,6 +1234,9 @@ impl eframe::App for StrataStudioApp {
 
         if ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
             self.sheet_full_tab_mode = !self.sheet_full_tab_mode;
+        }
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::E)) {
+            self.handle_tile_click("EXP_SVG");
         }
         if ctx.input(|i| i.key_pressed(egui::Key::R)) {
             self.flip_exterior_right = !self.flip_exterior_right;

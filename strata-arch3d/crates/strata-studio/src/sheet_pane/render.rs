@@ -813,6 +813,9 @@ pub fn render_sheet_pane_egui(
             if elem.points_mm.len() < 2 {
                 continue;
             }
+            if elem.layer_id == "단면_해칭" && !state.line_style.show_hatch_lines {
+                continue;
+            }
             if state.rubbing_roi_mm.is_some()
                 && (elem.layer_id.contains("외저면")
                     || (elem.layer_id.contains("보조_중심선")
@@ -1611,19 +1614,22 @@ pub fn render_sheet_pane_egui(
             state.set_rubbing_roi_mm(None);
             state.roi_drag_mode = false;
         }
+        let fill_lbl = if state.line_style.fill_section_solid {
+            "■ 먹물채움"
+        } else if state.line_style.show_hatch_lines {
+            "▨ 45° 빗금(0.15pt)"
+        } else {
+            "□ 외곽선만"
+        };
         let fill_btn = egui::Button::new(
-            egui::RichText::new(if state.line_style.fill_section_solid {
-                "■ 단면채움 ON"
-            } else {
-                "□ 단면채움"
-            })
-            .size(9.2)
-            .strong()
-            .color(if state.line_style.fill_section_solid {
-                paper
-            } else {
-                ink
-            }),
+            egui::RichText::new(fill_lbl)
+                .size(9.2)
+                .strong()
+                .color(if state.line_style.fill_section_solid {
+                    paper
+                } else {
+                    ink
+                }),
         )
         .fill(if state.line_style.fill_section_solid {
             ink
@@ -1633,7 +1639,23 @@ pub fn render_sheet_pane_egui(
         .stroke(egui::Stroke::new(1.0_f32, border))
         .corner_radius(3.5);
         if bar_ui.add(fill_btn).clicked() {
-            state.line_style.fill_section_solid = !state.line_style.fill_section_solid;
+            match (
+                state.line_style.fill_section_solid,
+                state.line_style.show_hatch_lines,
+            ) {
+                (false, true) => {
+                    state.line_style.fill_section_solid = true;
+                    state.line_style.show_hatch_lines = false;
+                }
+                (true, _) => {
+                    state.line_style.fill_section_solid = false;
+                    state.line_style.show_hatch_lines = false;
+                }
+                (false, false) => {
+                    state.line_style.fill_section_solid = false;
+                    state.line_style.show_hatch_lines = true;
+                }
+            }
         }
 
         // =========================================================================================

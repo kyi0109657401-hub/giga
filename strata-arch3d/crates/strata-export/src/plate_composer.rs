@@ -1748,6 +1748,53 @@ fn compose_archaeological_plate_inner(
         }
     }
 
+    // 3-B. Task 1-3(1) & A10: 『유물제도선.ai & 동국문화재축척및방위표.ai』 규격 유물 상·하·좌·우 끝점 연장선(`|`, `—`, 1.8mm 이격, 3.5mm 길이, 0.15pt=0.053mm) 자동 생성
+    {
+        let mut min_vx = f64::INFINITY;
+        let mut max_vx = f64::NEG_INFINITY;
+        let mut min_vy = f64::INFINITY;
+        let mut max_vy = f64::NEG_INFINITY;
+        for p in paths
+            .iter()
+            .filter(|p| p.layer_id == "단면_실선" || p.layer_id == "외곽선_실선")
+            .flat_map(|p| p.points_mm.iter())
+        {
+            min_vx = min_vx.min(p[0]);
+            max_vx = max_vx.max(p[0]);
+            min_vy = min_vy.min(p[1]);
+            max_vy = max_vy.max(p[1]);
+        }
+        if min_vx.is_finite() && max_vx.is_finite() && min_vy.is_finite() && max_vy.is_finite() {
+            let gap = 1.8_f64;
+            let len = 3.5_f64;
+            let ext_ticks = [
+                // 좌·우 상단 수평 연장선 (—)
+                [[min_vx - gap - len, max_vy], [min_vx - gap, max_vy]],
+                [[max_vx + gap, max_vy], [max_vx + gap + len, max_vy]],
+                // 좌·우 하단 수평 연장선 (—)
+                [[min_vx - gap - len, min_vy], [min_vx - gap, min_vy]],
+                [[max_vx + gap, min_vy], [max_vx + gap + len, min_vy]],
+                // 상·하 중심 수직 연장선 (|)
+                [[cx, max_vy + gap], [cx, max_vy + gap + len]],
+                [
+                    [cx, (min_vy - gap - len).max(10.0)],
+                    [cx, (min_vy - gap).max(10.5)],
+                ],
+            ];
+            for seg in ext_ticks {
+                paths.push(PlatePathElement {
+                    layer_id: String::from("연장선_규격"),
+                    points_mm: vec![seg[0], seg[1]],
+                    closed: false,
+                    stroke_hex: String::from("#141413"),
+                    stroke_width_mm: 0.053,
+                    dash_pattern_mm: None,
+                    fill_hex: None,
+                });
+            }
+        }
+    }
+
     // 4. 유물군별 다중 뷰 정밀 탁본(`Rubbing`) 래스터 영역 및 특화 도판 요소 배치
     let half_d = max_d * 0.5;
     let hsec_opt = input.horizontal_sections.iter().find(|s| {

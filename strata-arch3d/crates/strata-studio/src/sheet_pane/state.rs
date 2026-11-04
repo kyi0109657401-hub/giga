@@ -49,6 +49,10 @@ pub struct SheetPaneState {
     pub unrolled_size_mm: Option<[f64; 2]>,
     /// 화면 UI 다크 모드 (종이 위 칩·출력물은 불변, 창 바탕 문구만 테마 대응).
     pub dark_mode: bool,
+    /// 『유물 편집판.ai』 하단 유물번호 사용자 편집 문자열 (비어 있으면 파일명 자동 사용)
+    pub custom_artifact_number: String,
+    /// 『유물 편집판.ai』 하단 실측 확인 메모 (예: `유물재질, 결실부분 확인요함`)
+    pub custom_artifact_memo: String,
 }
 
 impl std::fmt::Debug for SheetPaneState {
@@ -103,6 +107,8 @@ impl Default for SheetPaneState {
             cached_bottom_tex: None,
             unrolled_size_mm: None,
             dark_mode: false,
+            custom_artifact_number: String::new(),
+            custom_artifact_memo: String::new(),
         }
     }
 }

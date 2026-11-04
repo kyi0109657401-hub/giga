@@ -21,9 +21,11 @@ pub use plate_composer::{
 };
 pub use ret_exporter::{export_ret_folder_package, RetPackageManifest};
 pub use svg_illustrator::{
-    base64_encode, render_plate_to_illustrator_svg, render_plate_to_illustrator_svg_with_meta,
-    render_plate_to_illustrator_svg_with_options, render_plate_to_illustrator_svg_with_photos,
-    PhotoSlot,
+    base64_encode, canonical_ai_stroke_width_mm, render_plate_to_illustrator_svg,
+    render_plate_to_illustrator_svg_with_meta, render_plate_to_illustrator_svg_with_options,
+    render_plate_to_illustrator_svg_with_photos,
+    render_plate_to_illustrator_svg_with_rubbings_and_photos, PhotoSlot, RubbingPngSlot,
+    AI_STANDARD_10_LAYER_GROUPS, AI_STANDARD_LINE_WEIGHTS_PT_MM,
 };
 
 #[cfg(test)]

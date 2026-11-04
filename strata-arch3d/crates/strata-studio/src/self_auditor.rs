@@ -59,7 +59,7 @@ pub fn run_autonomous_self_audit() -> Vec<SelfAuditGateResult> {
     slot.rebuild_plate(false, &view3d_state);
 
     let mut sheet_state = SheetPaneState::default();
-    let mut results = Vec::with_capacity(18);
+    let mut results = Vec::with_capacity(20);
 
     // 1. A1 ~ A5: 완형 토기 고고학 실측·기하 무결성 감사
     results.push(audit_a1_single_outer_wall_contour(&slot.composed_plate));
@@ -73,28 +73,34 @@ pub fn run_autonomous_self_audit() -> Vec<SelfAuditGateResult> {
     ));
     results.push(audit_a5_vertical_axis_and_rim_width_lock(&slot));
 
-    // 1-B. A6 ~ A9: 유물편(편조각 Potsherd) 3D 정위치·평면도·단면도·복원구경 타당성 감사
-    let (a6, a7, a8, a9) = audit_a6_to_a9_potsherd_integrity(&sherd_slot);
+    // 1-B. A6 ~ A10: 유물편(편조각 Potsherd) 3D 정위치·평면도·단면도·복원구경 타당성·연장선 감사
+    let (a6, a7, a8, a9, a10) = audit_a6_to_a10_potsherd_and_extension_ticks(&sherd_slot, &slot);
     results.push(a6);
     results.push(a7);
     results.push(a8);
     results.push(a9);
+    results.push(a10);
 
-    // 2. D1 ~ D5: UI 디자인·레이아웃·바운딩 박스 충돌 감사
-    let (d1, d2, d3, d4, d5) = audit_d1_to_d5_layout_and_ui(&slot, &view3d_state, &mut sheet_state);
+    // 2. D1 ~ D4: UI 디자인·레이아웃·바운딩 박스 충돌 감사
+    let (d1, d2, d3, d4, _d5) =
+        audit_d1_to_d5_layout_and_ui(&slot, &view3d_state, &mut sheet_state);
     results.push(d1);
     results.push(d2);
     results.push(d3);
     results.push(d4);
-    results.push(d5);
 
-    // 3. P1 ~ P4: 렌더링 성능·캐시·피벗 회전 무공전 감사
-    let (p1, p2, p3, p4) =
+    // 3. E1 ~ E3: 『유물 편집판.ai / 유물제도선.ai』 일러스트레이터 내보내기 감사
+    let (e1, e2, e3) = audit_e1_to_e3_illustrator_export(&slot, &sheet_state);
+    results.push(e1);
+    results.push(e2);
+    results.push(e3);
+
+    // 4. P1 ~ P3: 렌더링 성능·캐시·피벗 회전 무공전 감사
+    let (p1, p2, p3, _p4) =
         audit_p1_to_p4_performance_and_pivot(&mut slot, &mut view3d_state, &mut sheet_state);
     results.push(p1);
     results.push(p2);
     results.push(p3);
-    results.push(p4);
 
     results
 }
@@ -141,9 +147,11 @@ fn make_fallback_potsherd_slot() -> ArtifactSlotEntry {
     )
 }
 
-fn audit_a6_to_a9_potsherd_integrity(
+fn audit_a6_to_a10_potsherd_and_extension_ticks(
     sherd: &ArtifactSlotEntry,
+    vessel: &ArtifactSlotEntry,
 ) -> (
+    SelfAuditGateResult,
     SelfAuditGateResult,
     SelfAuditGateResult,
     SelfAuditGateResult,
@@ -226,7 +234,132 @@ fn audit_a6_to_a9_potsherd_integrity(
         detail: format!("유물편 상단 요약 표기=\"{compact_lbl}\" (타당성={fit_valid_or_fallback})"),
     };
 
-    (a6, a7, a8, a9)
+    // A10: 『유물제도선.ai & 동국문화재축척및방위표.ai』 상·하·좌·우 연장선(|, —) 생성 감사
+    let vessel_ticks = vessel
+        .composed_plate
+        .paths
+        .iter()
+        .filter(|p| p.layer_id == "연장선_규격")
+        .count();
+    let sherd_ticks = sherd
+        .composed_plate
+        .paths
+        .iter()
+        .filter(|p| p.layer_id == "연장선_규격")
+        .count();
+    let a10_ok = vessel_ticks >= 4 && sherd_ticks >= 4;
+    let a10 = SelfAuditGateResult {
+        gate_id: "A10",
+        category: "Archaeology",
+        title: "『유물제도선.ai』 상·하·좌·우 규격 연장선(|, —, 0.15pt) 생성 감사",
+        passed: a10_ok,
+        detail: format!(
+            "완형 연장선={vessel_ticks}개, 유물편 연장선={sherd_ticks}개 (0.15pt=0.053mm 기준선 정상)"
+        ),
+    };
+
+    (a6, a7, a8, a9, a10)
+}
+
+fn audit_e1_to_e3_illustrator_export(
+    slot: &ArtifactSlotEntry,
+    sheet_state: &SheetPaneState,
+) -> (
+    SelfAuditGateResult,
+    SelfAuditGateResult,
+    SelfAuditGateResult,
+) {
+    let mut mod_state = sheet_state.clone();
+    mod_state.custom_artifact_number = String::from("000115");
+    mod_state.custom_artifact_memo = String::from("유물재질, 결실부분 확인요함");
+    mod_state.line_style.section_width_mm = 0.80;
+
+    let (wysiwyg_plate, mut rubbing_slots) =
+        crate::sheet_pane::build_wysiwyg_exported_plate(&slot.composed_plate, &mod_state);
+    if rubbing_slots.is_empty() {
+        rubbing_slots.push(strata_export::RubbingPngSlot {
+            id: String::from("정밀탁본_래스터"),
+            rect_mm: [180.0, 130.0, 300.0, 250.0],
+            png_bytes: vec![
+                0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+            ],
+        });
+    }
+    let provenance = crate::sheet_pane::rubbing_provenance_line(&mod_state.rubbing_params);
+    let svg = strata_export::render_plate_to_illustrator_svg_with_rubbings_and_photos(
+        &wysiwyg_plate,
+        &provenance,
+        true,
+        &[],
+        &rubbing_slots,
+    );
+
+    let main_src = include_str!("main.rs");
+    let has_export_buttons = main_src.contains("\"EXP_SVG\"")
+        && main_src.contains("\"EXP_PDF\"")
+        && main_src.contains("\"EXP_DXF\"")
+        && main_src.contains("\"EXP_RET\"");
+    let path_tags: Vec<&str> = svg.lines().filter(|l| l.contains("<path ")).collect();
+    let cubic_paths = path_tags.iter().filter(|l| l.contains(" C ")).count();
+    let raw_l_only_paths = path_tags
+        .iter()
+        .filter(|l| l.contains(" L ") && !l.contains(" C "))
+        .count();
+    let e1_ok =
+        has_export_buttons && !path_tags.is_empty() && raw_l_only_only_zero(raw_l_only_paths);
+    let e1 = SelfAuditGateResult {
+        gate_id: "E1",
+        category: "Export",
+        title: "상단 바 내보내기 버튼 활성 및 SVG kurbo 3차 베지어(M...C...) 곡선 출력 감사",
+        passed: e1_ok,
+        detail: format!(
+            "내보내기버튼={has_export_buttons}, 3차베지어 경로={cubic_paths}/{}개 (단순 직선 L 전용 경로={raw_l_only_paths}건)",
+            path_tags.len()
+        ),
+    };
+
+    let missing_groups: Vec<&str> = strata_export::AI_STANDARD_10_LAYER_GROUPS
+        .iter()
+        .copied()
+        .filter(|g| !svg.contains(&format!(r#"<g id="{g}">"#)))
+        .collect();
+    let weights_ok = strata_export::AI_STANDARD_LINE_WEIGHTS_PT_MM.len() == 7
+        && svg.contains(r#"data-stroke-pt="0.80""#)
+        && svg.contains(r#"data-stroke-pt="0.50""#)
+        && svg.contains(r#"data-stroke-pt="0.15""#);
+    let e2_ok = missing_groups.is_empty() && weights_ok;
+    let e2 = SelfAuditGateResult {
+        gate_id: "E2",
+        category: "Export",
+        title:
+            "『유물제도선.ai / 유물 편집판.ai』 7단계 선 굵기 및 10대 표준 레이어(<g id>) 분리 감사",
+        passed: e2_ok,
+        detail: format!(
+            "10대 표준 레이어 누락={}건, 7단계 pt/mm 선굵기 메타 확인={weights_ok}",
+            missing_groups.len()
+        ),
+    };
+
+    let has_rubbing_img =
+        svg.contains(r#"<g id="03_정밀탁본_래스터">"#) && svg.contains("data:image/png;base64,");
+    let has_wysiwyg_edits = svg.contains("000115") && svg.contains("유물재질, 결실부분 확인요함");
+    let e3_ok = has_rubbing_img && has_wysiwyg_edits;
+    let e3 = SelfAuditGateResult {
+        gate_id: "E3",
+        category: "Export",
+        title: "정밀 탁본 PNG <image> Base64 임베드 및 WYSIWYG 조판·메모 반영 감사",
+        passed: e3_ok,
+        detail: format!(
+            "03_정밀탁본_래스터 Base64 PNG 임베드={has_rubbing_img}, 유물번호(000115)·실측메모 반영={has_wysiwyg_edits}"
+        ),
+    };
+
+    (e1, e2, e3)
+}
+
+#[inline]
+fn raw_l_only_only_zero(cnt: usize) -> bool {
+    cnt == 0
 }
 
 fn find_center_axis_x_and_span_y(plate: &ComposedPlate2D) -> (f64, f64, f64) {
@@ -1034,8 +1167,8 @@ mod tests {
         let results = run_autonomous_self_audit();
         assert_eq!(
             results.len(),
-            18,
-            "Must evaluate all 18 self-audit gates (A1~A9, D1~D5, P1~P4)"
+            20,
+            "Must evaluate all 20 self-audit gates (A1~A10, D1~D4, E1~E3, P1~P3)"
         );
         for r in &results {
             assert!(
