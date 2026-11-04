@@ -11,10 +11,10 @@ pub use pdf_tiled_print::{
     compute_tiled_print_plan, render_plate_to_pdf_bytes, PaperSheetSize, TiledPrintPlan,
 };
 pub use plate_composer::{
-    append_artifact_label_block, append_section_hatching, compose_archaeological_plate,
-    compose_archaeological_plate_with_mode, hatch_polygon_45, scale_bar_mid_label,
-    triangulate_polygon_ear_clipping, ComposedPlate2D, PlateComposeInput, PlateLayoutMode,
-    PlatePathElement, PlateRasterKind, PlateRasterRegion, PlateTextCallout,
+    append_artifact_label_block, append_section_hatching, append_site_north_arrow,
+    compose_archaeological_plate, compose_archaeological_plate_with_mode, hatch_polygon_45,
+    scale_bar_mid_label, triangulate_polygon_ear_clipping, ComposedPlate2D, PlateComposeInput,
+    PlateLayoutMode, PlatePathElement, PlateRasterKind, PlateRasterRegion, PlateTextCallout,
     NORTH_ARROW_HALF_WIDTH_MM, NORTH_ARROW_HEIGHT_MM, NORTH_ARROW_INNER_Y_MM,
     SCALE_BAR_BASELINE_GAP_MM, SCALE_BAR_HEIGHT_MM, SCALE_BAR_TICK_END_MM, SCALE_BAR_TICK_MID_MM,
     SCALE_BAR_TICK_MINOR_MM, WOOD_GRAIN_LINE_WIDTH_MM, WOOD_GRAIN_STROKE_COUNT,
@@ -808,8 +808,14 @@ mod tests {
 
     #[test]
     fn test_north_arrow_has_split_blades_and_vector_n_at_top_right() {
-        // 방위표 정본: 좌백·우흑 반분 연꽃(밑변 4.0 × 높이 7.83mm) + 벡터 "N", 우상단 배치.
-        let plate = compose_sample_vessel_plate();
+        // A4: 이동식 출토 유물 도판에는 기본적으로 방위_북화살이 없어야 하며,
+        // 유구 도면 전용 append_site_north_arrow 호출 시에만 좌백·우흑 반분 연꽃 + 벡터 "N"이 추가된다.
+        let mut plate = compose_sample_vessel_plate();
+        assert!(
+            plate.paths.iter().all(|p| p.layer_id != "방위_북화살"),
+            "이동식 유물 도판에 유구용 북화살표가 기본 생성되면 안 됨"
+        );
+        append_site_north_arrow(&mut plate);
         let blades: Vec<_> = plate
             .paths
             .iter()

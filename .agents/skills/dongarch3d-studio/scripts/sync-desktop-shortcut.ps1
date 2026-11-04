@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   STRATA 데스크톱 바로가기 고정 바이너리(`%LOCALAPPDATA%\Programs\STRATA\strata-studio.exe`) 빌드 및 동기화 스크립트
 
@@ -43,7 +43,18 @@ try {
         New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
     }
 
-    Copy-Item -Path $srcExe -Destination $dstExe -Force
+    try {
+        Copy-Item -Path $srcExe -Destination $dstExe -Force -ErrorAction Stop
+    }
+    catch {
+        # 실행 중인 strata-studio.exe가 파일을 잠그고 있는 경우 Windows 파일 핸들 특성을 이용해 이름 변경 후 교체
+        $stalePath = Join-Path $dstDir ("strata-studio.old." + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + ".exe")
+        Move-Item -Path $dstExe -Destination $stalePath -Force
+        Copy-Item -Path $srcExe -Destination $dstExe -Force
+        Get-ChildItem -Path $dstDir -Filter "strata-studio.old.*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+            Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     $srcHash = (Get-FileHash -Path $srcExe -Algorithm SHA256).Hash
     $dstHash = (Get-FileHash -Path $dstExe -Algorithm SHA256).Hash

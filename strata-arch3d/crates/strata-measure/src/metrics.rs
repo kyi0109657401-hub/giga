@@ -151,10 +151,31 @@ pub fn compute_artifact_measurements(
                 .filter(|p| p[2] >= z_top_band)
                 .map(|p| [p[0], p[1]])
                 .collect();
-            if let Ok(fit) = fit_rim_arc_unbiased(&rim_xy, false) {
-                rim_or_outer_diameter_mm = round_01(fit.diameter_mm);
-                diameter_std_err_mm = Some(round_01(fit.diameter_std_err_mm));
-                remaining_arc_pct = Some(round_01(fit.remaining_arc_pct));
+            if let Ok(mut fit) = fit_rim_arc_unbiased(&rim_xy, false) {
+                let rmse = if !rim_xy.is_empty() {
+                    let sq: f64 = rim_xy
+                        .iter()
+                        .map(|p| {
+                            let d = (p[0] - fit.center_xy[0]).hypot(p[1] - fit.center_xy[1]);
+                            (d - fit.radius_mm).powi(2)
+                        })
+                        .sum();
+                    (sq / (rim_xy.len() as f64)).sqrt()
+                } else {
+                    f64::INFINITY
+                };
+                let is_physically_valid_rim = fit.arc_span_deg >= 25.0
+                    && rmse <= 1.2
+                    && fit.diameter_mm >= max_xy * 0.85
+                    && fit.diameter_mm <= max_xy * 6.0;
+                if is_physically_valid_rim {
+                    rim_or_outer_diameter_mm = round_01(fit.diameter_mm);
+                    diameter_std_err_mm = Some(round_01(fit.diameter_std_err_mm));
+                    remaining_arc_pct = Some(round_01(fit.remaining_arc_pct));
+                } else {
+                    fit.plate_strategy = SherdPlateStrategy::ThreeColumnParallel;
+                    rim_or_outer_diameter_mm = round_01(max_xy);
+                }
                 sherd_circle_fit = Some(fit);
             }
         }

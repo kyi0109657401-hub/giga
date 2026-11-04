@@ -7,7 +7,7 @@ pub mod refit_baiser;
 pub mod tile_lithic_metal;
 
 pub use axis_solver::{
-    analyze_special_vessel_part, recover_body_sherd_stance_from_rills,
+    analyze_special_vessel_part, orient_potsherd_pca_upright, recover_body_sherd_stance_from_rills,
     solve_rotational_axis_huber_irls, RotationalAxisEstimate, SpecialPartDiagnostics,
 };
 pub use bead_perforation::{

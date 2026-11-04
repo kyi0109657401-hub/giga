@@ -237,13 +237,21 @@ pub fn render_topdown_concentric_plan_rgba(
         let p1 = screen_verts[i1];
         let p2 = screen_verts[i2];
 
-        let min_x = p0[0].min(p1[0]).min(p2[0]).floor().max(0.0) as usize;
-        let max_x = p0[0].max(p1[0]).max(p2[0]).ceil().min((w_usize - 1) as f64) as usize;
-        let min_y = p0[1].min(p1[1]).min(p2[1]).floor().max(0.0) as usize;
-        let max_y = p0[1].max(p1[1]).max(p2[1]).ceil().min((h_usize - 1) as f64) as usize;
-        if min_x > max_x || min_y > max_y {
+        let min_x_i = (p0[0].min(p1[0]).min(p2[0]) - 0.52).ceil().max(0.0) as isize;
+        let max_x_i = (p0[0].max(p1[0]).max(p2[0]) - 0.48)
+            .floor()
+            .min((w_usize - 1) as f64) as isize;
+        let min_y_i = (p0[1].min(p1[1]).min(p2[1]) - 0.52).ceil().max(0.0) as isize;
+        let max_y_i = (p0[1].max(p1[1]).max(p2[1]) - 0.48)
+            .floor()
+            .min((h_usize - 1) as f64) as isize;
+        if min_x_i > max_x_i || min_y_i > max_y_i {
             continue;
         }
+        let min_x = min_x_i as usize;
+        let max_x = max_x_i as usize;
+        let min_y = min_y_i as usize;
+        let max_y = max_y_i as usize;
 
         let denom = (p1[1] - p2[1]) * (p0[0] - p2[0]) + (p2[0] - p1[0]) * (p0[1] - p2[1]);
         if denom.abs() < 1e-7 {
@@ -456,14 +464,22 @@ pub fn render_mesh_zbuffer_rgba(
             continue;
         }
 
-        let min_x = p0[0].min(p1[0]).min(p2[0]).floor().max(0.0) as usize;
-        let max_x = p0[0].max(p1[0]).max(p2[0]).ceil().min((w_usize - 1) as f64) as usize;
-        let min_y = p0[1].min(p1[1]).min(p2[1]).floor().max(0.0) as usize;
-        let max_y = p0[1].max(p1[1]).max(p2[1]).ceil().min((h_usize - 1) as f64) as usize;
+        let min_x_i = (p0[0].min(p1[0]).min(p2[0]) - 0.52).ceil().max(0.0) as isize;
+        let max_x_i = (p0[0].max(p1[0]).max(p2[0]) - 0.48)
+            .floor()
+            .min((w_usize - 1) as f64) as isize;
+        let min_y_i = (p0[1].min(p1[1]).min(p2[1]) - 0.52).ceil().max(0.0) as isize;
+        let max_y_i = (p0[1].max(p1[1]).max(p2[1]) - 0.48)
+            .floor()
+            .min((h_usize - 1) as f64) as isize;
 
-        if min_x > max_x || min_y > max_y {
+        if min_x_i > max_x_i || min_y_i > max_y_i {
             continue;
         }
+        let min_x = min_x_i as usize;
+        let max_x = max_x_i as usize;
+        let min_y = min_y_i as usize;
+        let max_y = max_y_i as usize;
 
         let denom = (p1[1] - p2[1]) * (p0[0] - p2[0]) + (p2[0] - p1[0]) * (p0[1] - p2[1]);
         if denom.abs() < 1e-7 {

@@ -6,9 +6,25 @@
 //   $env:STRATA_REVIEW_PROMPT = "리뷰 요청 프롬프트..."
 //   ego-browser nodejs -e "await import('file:///$scriptUri')"
 
+import { execSync } from "node:child_process";
+
+let gitSummary = "";
+try {
+  gitSummary = execSync("git show HEAD --stat -U1", {
+    cwd: "D:/gigamesh",
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (gitSummary.length > 9000) {
+    gitSummary = gitSummary.slice(0, 9000) + "\n...[diff truncated]";
+  }
+} catch (_) {
+  gitSummary = "";
+}
+
 const promptText =
   process.env.STRATA_REVIEW_PROMPT ||
-  "저장소 https://github.com/kyi0109657401-hub/giga 의 최신 커밋 변경사항을 STRATA Rust Core Rules(unsafe 금지, unwrap 금지, 단일 원천 치수, UI 겹침 방지) 기준으로 코드 리뷰해 주세요.";
+  `다음은 STRATA (strata-arch3d) 최신 커밋(git show HEAD) 변경사항입니다. STRATA Rust Core Rules(1: #![forbid(unsafe_code)], 2: 프로덕션 unwrap/expect 금지, 3: 1:1 치수 및 모든 회전 각도 단면·평면도·정밀 탁본 정합성, 4: UI 겹침 방지) 기준으로 코드 리뷰해 주세요:\n\n${gitSummary}`;
 
 const spaces = await listTaskSpaces();
 const geminiSpaceEntry =
@@ -39,6 +55,18 @@ if (!/gemini\.google\.com/i.test(await page.url())) {
   await page.goto("https://gemini.google.com/app");
   await page.waitForLoadState("domcontentloaded");
 }
+
+// 전송 전 기존 응답 블록 수 및 마지막 응답 텍스트 기록
+const beforeState = await page.evaluate(() => {
+  const blocks = Array.from(
+    document.querySelectorAll("model-response, message-content")
+  );
+  const lastBlock = blocks.length > 0 ? blocks[blocks.length - 1] : null;
+  return {
+    count: blocks.length,
+    text: lastBlock ? (lastBlock.innerText || "").trim() : "",
+  };
+});
 
 // Quill 에디터(.ql-editor) 안전한 멀티라인 주입 및 전송
 const injected = await page.evaluate((rawText) => {
@@ -82,19 +110,29 @@ if (!injected?.ok) {
   throw new Error(`Gemini 프롬프트 입력창 탐색 실패: ${JSON.stringify(injected)}`);
 }
 
-await page.waitForTimeout(400);
-await page.keyboard.press("Enter");
+await page.waitForTimeout(500);
+const clickedSend = await page.evaluate(() => {
+  const btn = document.querySelector(
+    'button[aria-label*="메시지 보내기"], button.send-button, button[aria-label*="보내기"], button[aria-label*="Send"], button[aria-label*="전송"]'
+  );
+  if (btn && !btn.disabled) {
+    btn.click();
+    return true;
+  }
+  return false;
+});
+if (!clickedSend) {
+  await page.keyboard.press("Enter");
+}
 
-// 응답 생성이 시작되고 완료될 때까지 대기 (최대 90초)
+// 새 응답 블록이 생성되고 완료될 때까지 대기 (최대 90초)
 let lastResponse = "";
 let stableTicks = 0;
 for (let step = 0; step < 45; step++) {
   await page.waitForTimeout(2000);
   const state = await page.evaluate(() => {
     const blocks = Array.from(
-      document.querySelectorAll(
-        "message-content, model-response, .model-response-text, .markdown"
-      )
+      document.querySelectorAll("model-response, message-content")
     );
     const lastBlock = blocks.length > 0 ? blocks[blocks.length - 1] : null;
     const text = lastBlock ? (lastBlock.innerText || "").trim() : "";
@@ -102,10 +140,18 @@ for (let step = 0; step < 45; step++) {
       'button[aria-label*="중지"], button[aria-label*="Stop"]'
     );
     return {
+      count: blocks.length,
       text,
       generating: Boolean(stopBtn),
     };
   });
+
+  const isNewResponse =
+    state.count > beforeState.count ||
+    (state.text && state.text !== beforeState.text);
+  if (!isNewResponse) {
+    continue;
+  }
 
   if (state.text && state.text === lastResponse && !state.generating) {
     stableTicks += 1;

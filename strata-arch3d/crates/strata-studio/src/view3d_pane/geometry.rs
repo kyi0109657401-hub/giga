@@ -119,7 +119,49 @@ pub fn slice_transformed_mesh_world_locked(
             ]);
         }
     }
-    let polylines_2d = chain_2d_segments_into_polylines(&segments_2d, 0.45);
+    let polylines_2d = if !is_vertical_y_plane && segments_2d.len() > 360 {
+        const N_ANG: usize = 144;
+        let mut sum_x = 0.0_f64;
+        let mut sum_y = 0.0_f64;
+        for s in &segments_2d {
+            sum_x += s[0][0] + s[1][0];
+            sum_y += s[0][1] + s[1][1];
+        }
+        let inv_n = 1.0 / ((segments_2d.len() * 2).max(1) as f64);
+        let mx = sum_x * inv_n;
+        let my = sum_y * inv_n;
+        let mut bin_pt = [[0.0_f64; 2]; N_ANG];
+        let mut bin_max_r2 = [-1.0_f64; N_ANG];
+        for s in &segments_2d {
+            for &pt in s {
+                let dx = pt[0] - mx;
+                let dy = pt[1] - my;
+                let r2 = dx * dx + dy * dy;
+                let ang = dy.atan2(dx);
+                let bi = (((ang + std::f64::consts::PI) / std::f64::consts::TAU)
+                    .clamp(0.0, 0.999_999)
+                    * (N_ANG as f64)) as usize;
+                if r2 > bin_max_r2[bi] {
+                    bin_max_r2[bi] = r2;
+                    bin_pt[bi] = pt;
+                }
+            }
+        }
+        let mut ring: Vec<[f64; 2]> = (0..N_ANG)
+            .filter(|&i| bin_max_r2[i] >= 0.0)
+            .map(|i| bin_pt[i])
+            .collect();
+        if let Some(&first) = ring.first() {
+            ring.push(first);
+        }
+        if ring.len() >= 4 {
+            vec![ring]
+        } else {
+            chain_2d_segments_into_polylines(&segments_2d, 0.45)
+        }
+    } else {
+        chain_2d_segments_into_polylines(&segments_2d, 0.45)
+    };
     strata_section::PlaneSliceResult {
         orientation: if is_vertical_y_plane {
             strata_section::CutPlaneOrientation::VerticalLongitudinal
@@ -130,9 +172,6 @@ pub fn slice_transformed_mesh_world_locked(
         offset_mm: if is_vertical_y_plane {
             state.cut_y_mm
         } else {
-            // 변환된 월드 좌표는 `z = 0`(유물 바닥) 기준이므로, 절단면 높이도 그 기준값을 그대로 쓴다.
-            // (예전에는 `bbox.min[2]` 를 더해 100mm 이상 어긋난 값이 우측 도판 `수평 횡단면 (Z=…)`
-            //  라벨·절단 위치선에 찍혔다.)
             state.top_cut_z_mm
         },
         segments_2d,
@@ -351,28 +390,48 @@ pub fn extract_topdown_plan_slice_2d(
         }
     }
 
+    let min_fill_r = filled_max_r.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_fill_r = filled_max_r
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let circularity = min_fill_r / max_fill_r;
+    let span_px = (max_px - min_px).max(1.0);
+    let span_py = (max_py - min_py).max(1.0);
+    let xy_aspect = span_px.min(span_py) / span_px.max(span_py);
+    let is_upright_pose = state.tilt_deg.abs() < 15.0
+        && total_roll_deg.abs() < 15.0
+        && xy_aspect >= 0.80
+        && circularity >= 0.80;
+
     let mut outer_r = [r_nom; N_SECTORS];
     let mut foot_r = [(r_nom * 0.42).max(8.0); N_SECTORS];
     for k in 0..N_SECTORS {
-        let mut sum_o = 0.0;
-        let mut sum_w = 0.0;
-        let mut sum_f = 0.0;
-        let mut sum_fw = 0.0;
-        for d in -1isize..=1isize {
-            let nk = ((k as isize + d).rem_euclid(N_SECTORS as isize)) as usize;
-            let w = if d == 0 { 1.0 } else { 0.45 };
-            sum_o += filled_max_r[nk] * w;
-            sum_w += w;
-            if bin_foot_r[nk] > 3.0 {
-                sum_f += bin_foot_r[nk] * w;
-                sum_fw += w;
+        if is_upright_pose {
+            let mut sum_o = 0.0;
+            let mut sum_w = 0.0;
+            let mut sum_f = 0.0;
+            let mut sum_fw = 0.0;
+            for d in -1isize..=1isize {
+                let nk = ((k as isize + d).rem_euclid(N_SECTORS as isize)) as usize;
+                let w = if d == 0 { 1.0 } else { 0.45 };
+                sum_o += filled_max_r[nk] * w;
+                sum_w += w;
+                if bin_foot_r[nk] > 3.0 {
+                    sum_f += bin_foot_r[nk] * w;
+                    sum_fw += w;
+                }
             }
-        }
-        if sum_w > 0.0 {
-            outer_r[k] = sum_o / sum_w;
-        }
-        if sum_fw > 0.0 {
-            foot_r[k] = (sum_f / sum_fw).clamp(r_nom * 0.28, r_nom * 0.72);
+            if sum_w > 0.0 {
+                outer_r[k] = sum_o / sum_w;
+            }
+            if sum_fw > 0.0 {
+                foot_r[k] = (sum_f / sum_fw).clamp(r_nom * 0.28, r_nom * 0.72);
+            }
+        } else {
+            // 유물편(마름모·다각형 파편)은 모서리가 뭉개지지 않도록 원시 섹터 최대 반경을 그대로 보존한다.
+            outer_r[k] = filled_max_r[k];
         }
     }
 
@@ -394,18 +453,15 @@ pub fn extract_topdown_plan_slice_2d(
         valid_zs[(valid_zs.len() * 4 / 5).min(valid_zs.len().saturating_sub(1))]
     };
 
-    // 구연부 결손 복원 점선(is_broken)은 유물이 정위치 수평(upright) 상태이고
-    // 전체 원주 중 일부 구간만 깨진 경우에만 표시한다.
-    // 유물을 90° 등 회전·기울인 상태에서는 비원형 실루엣 전체를 가짜 점선 원으로 감싸지 않는다!
-    let is_upright_pose = state.tilt_deg.abs() < 15.0 && total_roll_deg.abs() < 15.0;
     let mut is_broken = [false; N_SECTORS];
     if is_upright_pose {
         let mut raw_broken = [false; N_SECTORS];
+        let r_drop_thresh = (recon_outer_r * 0.08).max(3.5);
+        let z_drop_thresh = (height_mm * 0.08).max(3.5);
         for k in 0..N_SECTORS {
-            if outer_r[k] < recon_outer_r - (recon_outer_r * 0.045).max(1.8)
-                || (bin_rim_z[k].is_finite()
-                    && bin_rim_z[k] < ref_rim_z - (height_mm * 0.045).max(1.8))
-            {
+            let r_dropped = outer_r[k] < recon_outer_r - r_drop_thresh;
+            let z_dropped = bin_rim_z[k].is_finite() && bin_rim_z[k] < ref_rim_z - z_drop_thresh;
+            if r_dropped && z_dropped {
                 raw_broken[k] = true;
             }
         }
@@ -417,11 +473,6 @@ pub fn extract_topdown_plan_slice_2d(
                         let nk = ((k as isize + d).rem_euclid(N_SECTORS as isize)) as usize;
                         is_broken[nk] = true;
                     }
-                }
-            }
-            for (k, &b) in is_broken.iter().enumerate() {
-                if b && outer_r[k] >= recon_outer_r - 1.2 {
-                    outer_r[k] = (recon_outer_r - wall_t * 0.72).max(recon_inner_r + 0.6);
                 }
             }
         }
@@ -618,6 +669,62 @@ pub fn extract_3d_plane_intersection_segments_full(
         state.top_cut_z_mm + 1e-7
     };
 
+    // P2 최적화: 정위치(tilt=0, roll=0)에서 수평횡단면(wz = plane_val_mm) 추출 시에는
+    // wz == pos[2] - z_min 이므로 15만 정점 전체 변환 할당 없이 교차 삼각형(~1,200개)만 즉시 필터링·변환한다 (< 0.5ms).
+    if !is_vertical_y_plane && state.tilt_deg.abs() < 1e-9 && total_roll_deg.abs() < 1e-9 {
+        let target_local_z = z_min + plane_val_mm;
+        return mesh
+            .triangles
+            .par_iter()
+            .filter_map(|tri| {
+                let p0 = mesh.positions[tri[0] as usize];
+                let p1 = mesh.positions[tri[1] as usize];
+                let p2 = mesh.positions[tri[2] as usize];
+                let d0 = p0[2] - target_local_z;
+                let d1 = p1[2] - target_local_z;
+                let d2 = p2[2] - target_local_z;
+                if (d0 > 0.0 && d1 > 0.0 && d2 > 0.0) || (d0 < 0.0 && d1 < 0.0 && d2 < 0.0) {
+                    return None;
+                }
+                let w0 = transform_local_vertex_full(
+                    p0, center_xy, z_min, height_mm, cos_p, sin_p, cos_t, sin_t, cos_r, sin_r,
+                    off_x,
+                );
+                let w1 = transform_local_vertex_full(
+                    p1, center_xy, z_min, height_mm, cos_p, sin_p, cos_t, sin_t, cos_r, sin_r,
+                    off_x,
+                );
+                let w2 = transform_local_vertex_full(
+                    p2, center_xy, z_min, height_mm, cos_p, sin_p, cos_t, sin_t, cos_r, sin_r,
+                    off_x,
+                );
+                let pts = [w0, w1, w2];
+                let d = [d0, d1, d2];
+                let mut hits = [[0.0_f64; 3]; 2];
+                let mut hit_count = 0usize;
+                for &(a, b) in &[(0usize, 1usize), (1, 2), (2, 0)] {
+                    if (d[a] >= 0.0 && d[b] < 0.0) || (d[a] < 0.0 && d[b] >= 0.0) {
+                        let denom = d[a] - d[b];
+                        let t = if denom.abs() > 1e-12 {
+                            d[a] / denom
+                        } else {
+                            0.5
+                        };
+                        if hit_count < 2 {
+                            hits[hit_count] = [
+                                pts[a][0] + t * (pts[b][0] - pts[a][0]),
+                                pts[a][1] + t * (pts[b][1] - pts[a][1]),
+                                pts[a][2] + t * (pts[b][2] - pts[a][2]),
+                            ];
+                        }
+                        hit_count += 1;
+                    }
+                }
+                (hit_count >= 2).then_some(hits)
+            })
+            .collect();
+    }
+
     let world_verts: Vec<[f64; 3]> = mesh
         .positions
         .par_iter()
@@ -628,51 +735,55 @@ pub fn extract_3d_plane_intersection_segments_full(
         })
         .collect();
 
-    let mut segs = Vec::new();
-    for tri in &mesh.triangles {
-        let w0 = world_verts[tri[0] as usize];
-        let w1 = world_verts[tri[1] as usize];
-        let w2 = world_verts[tri[2] as usize];
-        let pts = [w0, w1, w2];
-        let d = if is_vertical_y_plane {
-            [
-                w0[1] - plane_val_mm,
-                w1[1] - plane_val_mm,
-                w2[1] - plane_val_mm,
-            ]
-        } else {
-            [
-                w0[2] - plane_val_mm,
-                w1[2] - plane_val_mm,
-                w2[2] - plane_val_mm,
-            ]
-        };
+    mesh.triangles
+        .par_iter()
+        .filter_map(|tri| {
+            let w0 = world_verts[tri[0] as usize];
+            let w1 = world_verts[tri[1] as usize];
+            let w2 = world_verts[tri[2] as usize];
+            let pts = [w0, w1, w2];
+            let d = if is_vertical_y_plane {
+                [
+                    w0[1] - plane_val_mm,
+                    w1[1] - plane_val_mm,
+                    w2[1] - plane_val_mm,
+                ]
+            } else {
+                [
+                    w0[2] - plane_val_mm,
+                    w1[2] - plane_val_mm,
+                    w2[2] - plane_val_mm,
+                ]
+            };
 
-        if (d[0] > 0.0 && d[1] > 0.0 && d[2] > 0.0) || (d[0] < 0.0 && d[1] < 0.0 && d[2] < 0.0) {
-            continue;
-        }
-
-        let mut hits = Vec::with_capacity(3);
-        for &(a, b) in &[(0usize, 1usize), (1, 2), (2, 0)] {
-            if (d[a] >= 0.0 && d[b] < 0.0) || (d[a] < 0.0 && d[b] >= 0.0) {
-                let denom = d[a] - d[b];
-                let t = if denom.abs() > 1e-12 {
-                    d[a] / denom
-                } else {
-                    0.5
-                };
-                hits.push([
-                    pts[a][0] + t * (pts[b][0] - pts[a][0]),
-                    pts[a][1] + t * (pts[b][1] - pts[a][1]),
-                    pts[a][2] + t * (pts[b][2] - pts[a][2]),
-                ]);
+            if (d[0] > 0.0 && d[1] > 0.0 && d[2] > 0.0) || (d[0] < 0.0 && d[1] < 0.0 && d[2] < 0.0)
+            {
+                return None;
             }
-        }
-        if hits.len() >= 2 {
-            segs.push([hits[0], hits[1]]);
-        }
-    }
-    segs
+
+            let mut hits = [[0.0_f64; 3]; 2];
+            let mut hit_count = 0usize;
+            for &(a, b) in &[(0usize, 1usize), (1, 2), (2, 0)] {
+                if (d[a] >= 0.0 && d[b] < 0.0) || (d[a] < 0.0 && d[b] >= 0.0) {
+                    let denom = d[a] - d[b];
+                    let t = if denom.abs() > 1e-12 {
+                        d[a] / denom
+                    } else {
+                        0.5
+                    };
+                    if hit_count < 2 {
+                        hits[hit_count] = [
+                            pts[a][0] + t * (pts[b][0] - pts[a][0]),
+                            pts[a][1] + t * (pts[b][1] - pts[a][1]),
+                            pts[a][2] + t * (pts[b][2] - pts[a][2]),
+                        ];
+                    }
+                    hit_count += 1;
+                }
+            }
+            (hit_count >= 2).then_some(hits)
+        })
+        .collect()
 }
 
 /// 경계가 뒤집힌 경우에도 패닉 없이 `[a, b]`(순서 보정) 범위로 클램프한다.

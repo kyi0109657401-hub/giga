@@ -239,8 +239,8 @@ pub fn render_sheet_pane_egui(
         let scale = paper_scale * scale_factor;
         let cw_px = (plate.canvas_width_mm as f32) * scale;
         let ch_px = (plate.canvas_height_mm as f32) * scale;
-        let origin_x = p_rect.center().x - cw_px * 0.48;
-        let origin_y = p_rect.center().y + ch_px * 0.48;
+        let origin_x = (p_rect.left() + 8.0 * paper_scale).min(p_rect.center().x - cw_px * 0.5);
+        let origin_y = (p_rect.bottom() - 8.0 * paper_scale).max(p_rect.center().y + ch_px * 0.5);
 
         // 상단 용지설정·부분탁본 바, 선조정 바, 하단 탁본휠·축척설정 바 영역과의 충돌 방지
         let top_style_bar_rect = egui::Rect::from_min_size(
@@ -452,12 +452,12 @@ pub fn render_sheet_pane_egui(
             if !state.view_transforms[raster_layer_idx].visible {
                 continue;
             }
-            if ri == 0
-                && region.kind == PlateRasterKind::FrontExteriorRubbing
+            if region.kind != PlateRasterKind::BottomPlanRubbing
                 && !state.show_elevation_rubbing_overlay
                 && plate.raster_regions.len() > 1
             {
-                // 좌측 평단면(1:1 평면도 + 1:1 정면 입·단면도)은 일러스트용 순수 벡터 실측 선화로 유지!
+                // 좌측 평단면(1:1 평면도 + 1:1 정면 입·단면도)은 일러스트용 순수 벡터 실측 선화로 유지하고,
+                // 우상단(BottomPlanRubbing)에만 1:1 정밀 탁본 래스터를 단독 표시한다!
                 continue;
             }
             let r_off = state.view_transforms[raster_layer_idx].offset_mm();
@@ -872,14 +872,19 @@ pub fn render_sheet_pane_egui(
                 (c, elem.stroke_width_mm as f32)
             };
 
-            // Image 11: "검게 나오게 하지말고 선으로 나와야한다"
-            // state.line_style.fill_section_solid == true 일 때만 내부 채움을 수행하고, 기본값(false)에서는 깨끗한 외곽선(선)으로만 제도한다!
-            if state.line_style.fill_section_solid {
+            // Image 11 & A4: 단면은 fill_section_solid == true 일 때만 채우고, 단면이 아닌 일반 채움 다각형은 항상 채운다.
+            if state.line_style.fill_section_solid || !elem.layer_id.contains("단면") {
                 if let Some(ref fill_hex) = elem.fill_hex {
-                    if transformed_points_mm.len() >= 3 {
+                    if elem.layer_id != "치수_축척바디" && transformed_points_mm.len() >= 3 {
                         let tris = triangulate_polygon_ear_clipping(&transformed_points_mm);
                         if !tris.is_empty() {
-                            let fill_col = if fill_hex == "#B5573A" { terra } else { sec_col };
+                            let fill_col = if fill_hex == "#B5573A" {
+                                terra
+                            } else if fill_hex == "#FFFFFF" {
+                                paper
+                            } else {
+                                sec_col
+                            };
                             let mut mesh_shape = egui::epaint::Mesh::default();
                             for p in &transformed_points_mm {
                                 let pos = egui::pos2(
@@ -984,7 +989,14 @@ pub fn render_sheet_pane_egui(
             }
         }
 
-        // 텍스트 주석 및 치수 콜아웃 (각 레이어의 가시성 및 오프셋 연동)
+        // 텍스트 주석 및 치수 콜아웃 (각 레이어의 가시성·오프셋 및 active_scale_preset 단일원천 연동)
+        let scale_colon = state
+            .active_scale_preset
+            .label()
+            .split_whitespace()
+            .next()
+            .unwrap_or("1:1");
+        let (std_bar_mm, std_bar_lbl) = state.active_scale_preset.standard_scale_bar_mm();
         for c in plate.callouts.iter().filter(|_| state.unrolled_size_mm.is_none()) {
             if c.text.contains("평균두께")
                 || c.text.contains("최대동경")
@@ -1018,8 +1030,19 @@ pub fn render_sheet_pane_egui(
                 "#5E5D59" => muted,
                 _ => dim_col,
             };
-            // 축척 라벨 3단("0" · 절반값 · "전체값(축척)") 및 각 뷰 상단 제목 라벨은 하단 기준(LEFT_BOTTOM)으로 그려서
-            // 줌 배율이나 유물 크기가 달라져도 글자가 아래쪽 도면 원호나 눈금선 안으로 절대 침범하지 않게 한다.
+            let synced_text = if c.layer_id == "치수_축척라벨" {
+                if c.text == "0" {
+                    String::from("0")
+                } else if c.text.contains('(') {
+                    std_bar_lbl.to_string()
+                } else {
+                    strata_export::scale_bar_mid_label(std_bar_mm)
+                }
+            } else if c.text.starts_with("1:1 ") {
+                c.text.replacen("1:1", scale_colon, 1)
+            } else {
+                c.text.clone()
+            };
             let align = if c.layer_id == "치수_축척라벨"
                 || c.layer_id == "평면도_라벨"
                 || c.layer_id == "탁본_라벨"
@@ -1033,7 +1056,7 @@ pub fn render_sheet_pane_egui(
             paper_painter.text(
                 pos,
                 align,
-                &c.text,
+                &synced_text,
                 egui::FontId::proportional(10.5),
                 col,
             );
@@ -1123,10 +1146,24 @@ pub fn render_sheet_pane_egui(
                         egui::Stroke::NONE,
                     ));
                 }
+                let is_unreconstructed_sherd = report.category
+                    != strata_core::ArtifactCategory::CompleteVessel
+                    && report
+                        .sherd_circle_fit
+                        .as_ref()
+                        .is_none_or(|f| {
+                            f.plate_strategy
+                                == strata_core::SherdPlateStrategy::ThreeColumnParallel
+                        });
+                let top_dim_text = if is_unreconstructed_sherd {
+                    format!("잔존폭 {:.1}mm", rim_mm)
+                } else {
+                    format!("구경 {:.1}mm", rim_mm)
+                };
                 paper_painter.text(
                     egui::pos2((dim_x0 + dim_x1) * 0.5, dim_y - 6.5),
                     egui::Align2::CENTER_CENTER,
-                    format!("구경 {:.1}mm", rim_mm),
+                    top_dim_text,
                     egui::FontId::proportional(9.5),
                     dim_col,
                 );
@@ -1157,6 +1194,11 @@ pub fn render_sheet_pane_egui(
                     ));
                 }
                 let h_mm = (first_reg.rect_mm[3] - first_reg.rect_mm[1]).abs();
+                let side_dim_text = if is_unreconstructed_sherd {
+                    format!("잔존고 {:.1}mm", h_mm)
+                } else {
+                    format!("높이 {:.1}mm", h_mm)
+                };
                 let h_lbl_rect = egui::Rect::from_center_size(
                     egui::pos2(dim_x - 28.0, (ry_top + ry_bot) * 0.5),
                     egui::vec2(52.0, 15.0),
@@ -1169,7 +1211,7 @@ pub fn render_sheet_pane_egui(
                 paper_painter.text(
                     egui::pos2(dim_x - 4.0, (ry_top + ry_bot) * 0.5),
                     egui::Align2::RIGHT_CENTER,
-                    format!("높이 {:.1}mm", h_mm),
+                    side_dim_text,
                     egui::FontId::proportional(9.5),
                     dim_col,
                 );
@@ -1181,11 +1223,11 @@ pub fn render_sheet_pane_egui(
         // 5개 도면 뷰(0: 1:1 평면도, 1: 1:1 단면도, 2: 1:1 정밀 탁본, 3: 1:1 수평 횡단면, 4: 추가 단면 A-A') 상단에
         // 각각 독립된 [✥이동] [↻90°] [↕180°] [↻앞으로] [🗑Del] 컨트롤 바를 배치한다!
         // =========================================================================================
-        let plan_top_mm = cy_plan_mm + half_d_mm + 14.0;
-        let elev_top_ctrl_mm = top_elev_mm + 16.0;
-        let rub_top_mm = rub_reg_mm[1].max(rub_reg_mm[3]) + 14.0;
+        let plan_top_mm = cy_plan_mm + half_d_mm + 9.0;
+        let elev_top_ctrl_mm = top_elev_mm + 11.0;
+        let rub_top_mm = rub_reg_mm[1].max(rub_reg_mm[3]) + 9.0;
         let hsec_bot_ctrl_mm = (cy_hsec_mm - half_d_mm * 0.86 - 4.0).max(8.0);
-        let custom_top_mm = cy_custom_mm + half_d_mm * 0.65 + 14.0;
+        let custom_top_mm = cy_custom_mm + half_d_mm * 0.65 + 9.0;
         let individual_anchors = [
             (0usize, "sheet_view_tf_plan", [cx_left_mm, plan_top_mm], true),
             (1usize, "sheet_view_tf_elev", [cx_left_mm, elev_top_ctrl_mm], true),
@@ -1269,11 +1311,11 @@ pub fn render_sheet_pane_egui(
                 vec![0, 1, 2, 3, 5]
             };
             let row_h = 20.0_f32;
-            let panel_w = 238.0_f32;
+            let panel_w = 214.0_f32;
             let panel_h = 26.0 + (active_layer_indices.len() as f32) * row_h + 6.0;
             let layer_panel_rect = egui::Rect::from_min_size(
                 egui::pos2(
-                    (sheet_rect.right() - panel_w - 8.0).max(sheet_rect.left() + 12.0),
+                    (sheet_rect.right() - panel_w - 6.0).max(sheet_rect.left() + 12.0),
                     sheet_rect.top() + 34.0,
                 ),
                 egui::vec2(panel_w, panel_h),

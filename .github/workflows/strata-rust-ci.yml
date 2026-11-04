@@ -4,7 +4,7 @@ name: STRATA DongArch3D Rust CI (V1-V8 Harness)
 # 이전 계정에서는 결제 문제로 push 마다 실패 기록이 쌓여 workflow_dispatch 로 막아두었었다.
 on:
   push:
-    branches: [master, main, "feat/**", "factory/**"]
+    branches: [master, main, "feat/**", "fix/**", "factory/**"]
     paths:
       - "strata-arch3d/**"
       - "docs/ui/**"

@@ -5,6 +5,7 @@ pub mod gpu_backend;
 pub mod harness_runner;
 pub mod layout_r1;
 pub mod rubbing_ddg_pipeline;
+pub mod self_auditor;
 pub mod sheet_pane;
 pub mod splash;
 pub mod theme;
@@ -54,26 +55,28 @@ use theme::ThemeMode;
 use view3d_pane::{render_view3d_pane_egui, View3DPaneState};
 
 #[derive(Debug)]
-struct ArtifactSlotEntry {
-    title: String,
+pub(crate) struct ArtifactSlotEntry {
+    pub(crate) title: String,
     #[allow(dead_code)]
-    source_path: Option<PathBuf>,
-    category: ArtifactCategory,
-    sherd_subtype: Option<SherdSubtype>,
-    bead_subtype: Option<BeadSubtype>,
-    bead_drill_type: Option<BeadDrillType>,
-    mesh: TriMesh,
-    bvh: StacklessLbvh,
-    segmentation: SherdSegmentation,
-    rim_gap_chart: RimGapChart360,
-    recommended_best_angle_deg: f64,
-    measurements: ArtifactMeasurementReport,
-    vertical_section: PlaneSliceResult,
-    horizontal_section: PlaneSliceResult,
-    occluded_spans: Vec<OccludedDashedSpan>,
-    composed_plate: ComposedPlate2D,
+    pub(crate) source_path: Option<PathBuf>,
+    pub(crate) category: ArtifactCategory,
+    pub(crate) sherd_subtype: Option<SherdSubtype>,
+    pub(crate) bead_subtype: Option<BeadSubtype>,
+    pub(crate) bead_drill_type: Option<BeadDrillType>,
+    pub(crate) mesh: TriMesh,
+    pub(crate) bvh: StacklessLbvh,
+    pub(crate) segmentation: SherdSegmentation,
+    pub(crate) rim_gap_chart: RimGapChart360,
+    pub(crate) recommended_best_angle_deg: f64,
+    pub(crate) measurements: ArtifactMeasurementReport,
+    pub(crate) vertical_section: PlaneSliceResult,
+    pub(crate) horizontal_section: PlaneSliceResult,
+    pub(crate) cached_top_plan_section: Option<PlaneSliceResult>,
+    pub(crate) last_vsec_pose_key: Option<(i32, i32, i32, i32, i32, i32)>,
+    pub(crate) occluded_spans: Vec<OccludedDashedSpan>,
+    pub(crate) composed_plate: ComposedPlate2D,
     /// 사용자가 상단 드롭다운에서 강제 지정한 도판 모드 (`None` 이면 유물 분류로 자동 판정)
-    layout_mode_override: Option<PlateLayoutMode>,
+    pub(crate) layout_mode_override: Option<PlateLayoutMode>,
 }
 
 impl ArtifactSlotEntry {
@@ -87,6 +90,13 @@ impl ArtifactSlotEntry {
         mesh: TriMesh,
     ) -> Self {
         let title_str = title.into();
+        // Task A-1 & A6: .ap2 변환 행렬이 없는 유물편(Potsherd)은 PCA 3축 고유분해로 똑바로 세워
+        // 최소 분산 두께 축(e3)이 정면 시선 축(Y), 최대 길이·높이 축(e1)이 수직 축(+Z)이 되도록 정위치 정렬한다.
+        let mesh = if category == ArtifactCategory::Potsherd && mesh.ap2_cut_offset_mm.is_none() {
+            strata_orient::orient_potsherd_pca_upright(&mesh)
+        } else {
+            mesh
+        };
         let bvh = StacklessLbvh::build(&mesh);
         let segmentation = segment_sherd_three_regions(&mesh, 35.0, 0.8);
         let rim_gap_chart = compute_rim_gap_chart_360(&mesh, true);
@@ -159,6 +169,8 @@ impl ArtifactSlotEntry {
             measurements,
             vertical_section,
             horizontal_section,
+            cached_top_plan_section: None,
+            last_vsec_pose_key: None,
             occluded_spans,
             composed_plate,
             layout_mode_override: None,
@@ -173,20 +185,41 @@ impl ArtifactSlotEntry {
         entry
     }
 
-    fn rebuild_plate(&mut self, flip_exterior_right: bool, view3d_state: &View3DPaneState) {
-        let mut v_sec =
-            crate::view3d_pane::slice_transformed_mesh_world_locked(&self.mesh, view3d_state, true);
-        if v_sec.polylines_2d.is_empty() {
-            v_sec = slice_mesh_with_fixed_plane(
+    pub fn rebuild_plate(&mut self, flip_exterior_right: bool, view3d_state: &View3DPaneState) {
+        let vsec_pose_key = (
+            (view3d_state.active_section_angle_deg * 10.0).round() as i32,
+            (view3d_state.tilt_deg * 10.0).round() as i32,
+            (view3d_state.roll_deg * 10.0).round() as i32,
+            (view3d_state.inner_level_deg * 20.0).round() as i32,
+            (view3d_state.artifact_offset_x_mm * 100.0).round() as i32,
+            (view3d_state.cut_y_mm * 100.0).round() as i32,
+        );
+        let pose_changed = self.last_vsec_pose_key != Some(vsec_pose_key);
+        if pose_changed {
+            let mut v_sec = crate::view3d_pane::slice_transformed_mesh_world_locked(
                 &self.mesh,
-                Some(&self.bvh),
-                CutPlaneOrientation::VerticalLongitudinal,
-                view3d_state.active_section_angle_deg,
-                view3d_state.cut_y_mm,
-                0.25,
+                view3d_state,
+                true,
             );
+            if v_sec.polylines_2d.is_empty() {
+                v_sec = slice_mesh_with_fixed_plane(
+                    &self.mesh,
+                    Some(&self.bvh),
+                    CutPlaneOrientation::VerticalLongitudinal,
+                    view3d_state.active_section_angle_deg,
+                    view3d_state.cut_y_mm,
+                    0.25,
+                );
+            }
+            self.vertical_section = v_sec;
+            self.occluded_spans =
+                infer_occluded_dashed_spans(&self.vertical_section.polylines_2d, 1.5, 24.0);
+            self.cached_top_plan_section = Some(crate::view3d_pane::extract_topdown_plan_slice_2d(
+                &self.mesh,
+                view3d_state,
+            ));
+            self.last_vsec_pose_key = Some(vsec_pose_key);
         }
-        self.vertical_section = v_sec;
 
         let mut h_sec = crate::view3d_pane::slice_transformed_mesh_world_locked(
             &self.mesh,
@@ -204,18 +237,16 @@ impl ArtifactSlotEntry {
             );
         }
         self.horizontal_section = h_sec;
-        self.occluded_spans =
-            infer_occluded_dashed_spans(&self.vertical_section.polylines_2d, 1.5, 24.0);
         let sherd_strategy = self
             .measurements
             .sherd_circle_fit
             .as_ref()
             .map(|f| f.plate_strategy);
         let mut h_secs = vec![self.horizontal_section.clone()];
-        let top_plan_sec =
-            crate::view3d_pane::extract_topdown_plan_slice_2d(&self.mesh, view3d_state);
-        if !top_plan_sec.polylines_2d.is_empty() {
-            h_secs.push(top_plan_sec);
+        if let Some(ref top_plan_sec) = self.cached_top_plan_section {
+            if !top_plan_sec.polylines_2d.is_empty() {
+                h_secs.push(top_plan_sec.clone());
+            }
         }
         if let Some(custom_sec) =
             crate::view3d_pane::slice_custom_line_section_2d(&self.mesh, view3d_state)
@@ -355,10 +386,17 @@ pub fn build_darch_project(input: &ProjectSaveInput) -> DarchProject {
 /// 도판 구경선·치수선 라벨과 동일한 값을 표기해야 한다.
 pub fn format_compact_metric(m: &ArtifactMeasurementReport) -> String {
     if let Some(ref fit) = m.sherd_circle_fit {
-        format!(
-            "복원구경 Φ{:.1}mm · 잔존고 {:.1}mm · 두께 {:.1}mm",
-            fit.diameter_mm, m.height_or_length_mm, m.mean_wall_thickness_mm,
-        )
+        if fit.plate_strategy == strata_core::SherdPlateStrategy::ThreeColumnParallel {
+            format!(
+                "잔존폭 {:.1}mm · 잔존고 {:.1}mm · 두께 {:.1}mm",
+                m.max_belly_diameter_mm, m.height_or_length_mm, m.mean_wall_thickness_mm,
+            )
+        } else {
+            format!(
+                "복원구경 Φ{:.1}mm · 잔존고 {:.1}mm · 두께 {:.1}mm",
+                fit.diameter_mm, m.height_or_length_mm, m.mean_wall_thickness_mm,
+            )
+        }
     } else {
         format!(
             "기고 {:.1}mm · 구경 Φ{:.1}mm · 두께 {:.1}mm",
@@ -367,6 +405,48 @@ pub fn format_compact_metric(m: &ArtifactMeasurementReport) -> String {
     }
 }
 
+/// 로드된 3D 스캔 메쉬의 기하 특성(상부 중앙 중공 여부 및 72방위각 원형도)을 검사하여
+/// 360° 회전 대칭 완형 용기(`CompleteVessel`)인지 유물편(`Potsherd`)인지 자동 판별한다.
+pub(crate) fn classify_loaded_scan_category(
+    mesh: &TriMesh,
+) -> (ArtifactCategory, Option<SherdSubtype>) {
+    if mesh.ap2_cut_offset_mm.is_some() {
+        return (ArtifactCategory::CompleteVessel, None);
+    }
+    let ext = mesh.bbox.extents();
+    let max_xy = ext[0].max(ext[1]).max(1.0);
+    let min_xy = ext[0].min(ext[1]);
+    let dz = ext[2];
+    if min_xy / max_xy < 0.80 || dz < max_xy * 0.32 {
+        return (ArtifactCategory::Potsherd, Some(SherdSubtype::RimSherd));
+    }
+    let cx = 0.5 * (mesh.bbox.min[0] + mesh.bbox.max[0]);
+    let cy = 0.5 * (mesh.bbox.min[1] + mesh.bbox.max[1]);
+    let r_nom = 0.5 * max_xy;
+    let z_upper = mesh.bbox.min[2] + 0.65 * dz;
+    let mut upper_center_pts = 0usize;
+    const N_SEC: usize = 72;
+    let mut sec_max_r = [0.0_f64; N_SEC];
+    for p in &mesh.positions {
+        let r = (p[0] - cx).hypot(p[1] - cy);
+        if p[2] >= z_upper && r < r_nom * 0.38 {
+            upper_center_pts += 1;
+        }
+        let ang = (p[1] - cy).atan2(p[0] - cx);
+        let bi = (((ang + std::f64::consts::PI) / std::f64::consts::TAU).clamp(0.0, 0.999_999)
+            * (N_SEC as f64)) as usize;
+        if r > sec_max_r[bi] {
+            sec_max_r[bi] = r;
+        }
+    }
+    let min_r = sec_max_r.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_r = sec_max_r.iter().copied().fold(0.0_f64, f64::max).max(1.0);
+    if upper_center_pts == 0 && (min_r / max_r) >= 0.82 {
+        (ArtifactCategory::CompleteVessel, None)
+    } else {
+        (ArtifactCategory::Potsherd, Some(SherdSubtype::RimSherd))
+    }
+}
 impl StrataStudioApp {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
@@ -409,13 +489,14 @@ impl StrataStudioApp {
                     .and_then(|s| s.to_str())
                     .unwrap_or("스캔 유물")
                     .to_string();
+                let (cat, sherd_sub) = classify_loaded_scan_category(&mesh);
                 slots.insert(
                     0,
                     ArtifactSlotEntry::from_mesh(
                         title,
                         Some(p.clone()),
-                        ArtifactCategory::CompleteVessel,
-                        None,
+                        cat,
+                        sherd_sub,
                         None,
                         None,
                         mesh,
@@ -493,7 +574,7 @@ impl StrataStudioApp {
         }
     }
 
-    fn load_real_or_preset_slots(slots: &mut Vec<ArtifactSlotEntry>) {
+    pub(crate) fn load_real_or_preset_slots(slots: &mut Vec<ArtifactSlotEntry>) {
         slots.clear();
         let p_7obj = Path::new(r"E:\034(7-실4-4)\7지구 9호-7.obj");
         if p_7obj.exists() {
@@ -542,7 +623,7 @@ impl StrataStudioApp {
 
     /// B9: 퇴화 입력(0 이하·비유한 치수)에는 패닉 대신 `None`을 돌려준다.
     /// 호출자는 슬롯을 그냥 건너뛰고, 실측 슬롯 로드가 이어진다.
-    fn make_preset_slot(
+    pub(crate) fn make_preset_slot(
         title: &str,
         category: ArtifactCategory,
         sherd_subtype: Option<SherdSubtype>,
@@ -805,6 +886,14 @@ impl StrataStudioApp {
                                 );
                                 self.slots.push(slot);
                                 self.selected_slot_idx = self.slots.len() - 1;
+                                self.sheet_state.set_rubbing_roi_mm(None);
+                                self.sheet_state.roi_drag_mode = false;
+                                self.sheet_state.scale_locked = false;
+                                self.view3d_state.tilt_deg = 0.0;
+                                self.view3d_state.roll_deg = 0.0;
+                                self.view3d_state.inner_level_deg = 0.0;
+                                self.view3d_state.artifact_offset_x_mm = 0.0;
+                                self.view3d_state.cut_y_mm = 0.0;
                                 self.status_message = format!("파일 로드 완료: {}", path.display());
                             }
                             Err(err) => {
@@ -923,9 +1012,15 @@ impl StrataStudioApp {
                 self.sheet_full_tab_mode = !self.sheet_full_tab_mode;
             }
             "VERIFY_L" => {
-                let checks = run_v1_to_v8_verification_harness()
+                let checks = self_auditor::run_autonomous_self_audit()
                     .into_iter()
-                    .map(|c| (format!("{} {}", c.gate_id, c.title), c.passed, c.detail))
+                    .map(|r| {
+                        (
+                            format!("{} [{}] {}", r.gate_id, r.category, r.title),
+                            r.passed,
+                            r.detail,
+                        )
+                    })
                     .collect();
                 self.active_dialog = Some(ActiveStrataDialog::PreExportVerifyL { checks });
             }
@@ -936,17 +1031,53 @@ impl StrataStudioApp {
             }
             "EXP_PDF" => {
                 if let Some(slot) = self.slots.get(self.selected_slot_idx) {
-                    let plan = compute_tiled_print_plan(
-                        &slot.composed_plate,
-                        PaperSheetSize::A4Portrait,
-                        10.0,
-                    );
-                    self.active_dialog = Some(ActiveStrataDialog::TiledPrintPreviewL { plan });
+                    if let Some(out_path) = rfd::FileDialog::new()
+                        .add_filter("1:1 분할 인쇄 도판 (.pdf)", &["pdf"])
+                        .set_file_name("strata_plate_1to1.pdf")
+                        .save_file()
+                    {
+                        let pdf_bytes = render_plate_to_pdf_bytes(
+                            &slot.composed_plate,
+                            PaperSheetSize::A4Portrait,
+                            10.0,
+                        );
+                        if std::fs::write(&out_path, &pdf_bytes).is_ok() {
+                            self.status_message =
+                                format!("1:1 PDF 도판 내보내기 완료: {}", out_path.display());
+                        }
+                    } else {
+                        let plan = compute_tiled_print_plan(
+                            &slot.composed_plate,
+                            PaperSheetSize::A4Portrait,
+                            10.0,
+                        );
+                        self.active_dialog = Some(ActiveStrataDialog::TiledPrintPreviewL { plan });
+                    }
+                }
+            }
+            "EXP_DXF" => {
+                if let Some(slot) = self.slots.get(self.selected_slot_idx) {
+                    let out_path = rfd::FileDialog::new()
+                        .add_filter("AutoCAD R12 도판 (.dxf)", &["dxf"])
+                        .set_file_name("strata_plate_r12.dxf")
+                        .save_file()
+                        .unwrap_or_else(|| std::env::temp_dir().join("strata_plate_r12.dxf"));
+                    let dxf = strata_export::export_plate_to_dxf_r12(&slot.composed_plate);
+                    if std::fs::write(&out_path, dxf.as_bytes()).is_ok() {
+                        self.status_message = format!(
+                            "AutoCAD R12 DXF($INSUNITS=4 mm) 저장 완료: {}",
+                            out_path.display()
+                        );
+                    }
                 }
             }
             "EXP_SVG" => {
                 if let Some(slot) = self.slots.get(self.selected_slot_idx) {
-                    let out_path = std::env::temp_dir().join("strata_cutline_rc0.svg");
+                    let out_path = rfd::FileDialog::new()
+                        .add_filter("Adobe Illustrator 레이어 도판 (.svg)", &["svg"])
+                        .set_file_name("strata_cutline_rc0.svg")
+                        .save_file()
+                        .unwrap_or_else(|| std::env::temp_dir().join("strata_cutline_rc0.svg"));
                     // 탁본 출처(광원·파라미터·전개모드)를 SVG 메타데이터에 각인해 재현 근거를 남긴다.
                     let provenance = crate::sheet_pane::rubbing_provenance_line(
                         &self.sheet_state.rubbing_params,
@@ -1151,16 +1282,33 @@ impl eframe::App for StrataStudioApp {
                     }
                     if ui
                         .add(
-                            egui::Button::new(
-                                egui::RichText::new("💾 저장").size(11.0).color(ink),
-                            )
-                            .fill(wash)
-                            .stroke(egui::Stroke::new(1.0_f32, edge_col))
-                            .corner_radius(4.0),
+                            egui::Button::new(egui::RichText::new("💾 저장").size(11.0).color(ink))
+                                .fill(wash)
+                                .stroke(egui::Stroke::new(1.0_f32, edge_col))
+                                .corner_radius(4.0),
                         )
                         .clicked()
                     {
                         self.handle_tile_click("SAVE");
+                    }
+                    for (code, lbl, tip) in [
+                        ("EXP_SVG", "📤 SVG", "Adobe Illustrator 레이어 분리 SVG 도판 내보내기 (1 user unit = 1mm)"),
+                        ("EXP_PDF", "📄 PDF", "1:1 실측 분할 인쇄 PDF 도판 내보내기"),
+                        ("EXP_DXF", "📐 DXF", "AutoCAD R12 ($INSUNITS=4 mm, 11개 레이어) DXF 도판 내보내기"),
+                        ("EXP_RET", "📦 ret/", "고고학 보고서 ret/ 폴더 패키지(SVG + 정밀탁본 PNG + 치수표 CSV/MD) 일괄 내보내기"),
+                    ] {
+                        if ui
+                            .add(
+                                egui::Button::new(egui::RichText::new(lbl).size(10.5).color(ink))
+                                    .fill(wash)
+                                    .stroke(egui::Stroke::new(1.0_f32, edge_col))
+                                    .corner_radius(4.0),
+                            )
+                            .on_hover_text(tip)
+                            .clicked()
+                        {
+                            self.handle_tile_click(code);
+                        }
                     }
                     ui.separator();
 
@@ -1197,25 +1345,15 @@ impl eframe::App for StrataStudioApp {
                     }
                     if let Some(idx) = newly_selected {
                         self.selected_slot_idx = idx;
+                        self.sheet_state.set_rubbing_roi_mm(None);
+                        self.sheet_state.roi_drag_mode = false;
+                        self.sheet_state.scale_locked = false;
                     }
                     ui.separator();
 
-                    // 부분 탁본 드래그 및 정밀 탁본창 토글
+                    // D4: 부분탁본 토글 및 GPU/FPS 배지는 도판 상단 바(sheet_pane)에 단일 배치하여 중복을 제거한다.
                     if ui
-                        .selectable_label(
-                            self.sheet_state.roi_drag_mode,
-                            "⬚ 부분탁본",
-                        )
-                        .on_hover_text("우측 2D 도판에서 드래그하여 1:1 부분 정밀 탁본 영역 지정")
-                        .clicked()
-                    {
-                        self.sheet_state.roi_drag_mode = !self.sheet_state.roi_drag_mode;
-                    }
-                    if ui
-                        .selectable_label(
-                            self.sheet_state.show_roi_rubbing_window,
-                            "탁본창",
-                        )
+                        .selectable_label(self.sheet_state.show_roi_rubbing_window, "탁본창")
                         .on_hover_text("정밀 탁본 농도·대비·선명도 독립 창 열기/닫기")
                         .clicked()
                     {
@@ -1223,46 +1361,28 @@ impl eframe::App for StrataStudioApp {
                             !self.sheet_state.show_roi_rubbing_window;
                     }
                     if ui
+                        .button(egui::RichText::new("🔍 자가진단").size(11.0).color(ink))
+                        .on_hover_text(
+                            "앱 내부 SelfAuditor 14대 정밀 감사(A1~A5 · D1~D5 · P1~P4) 즉시 실행",
+                        )
+                        .clicked()
+                    {
+                        self.handle_tile_click("VERIFY_L");
+                    }
+                    if ui
                         .checkbox(&mut self.flip_exterior_right, "R 반전")
                         .changed()
                     {
                         if let Some(slot) = self.slots.get_mut(self.selected_slot_idx) {
-                            slot.rebuild_plate(
-                                self.flip_exterior_right,
-                                &self.view3d_state,
-                            );
+                            slot.rebuild_plate(self.flip_exterior_right, &self.view3d_state);
                         }
                     }
                     ui.checkbox(&mut self.sheet_full_tab_mode, "Tab 확대");
                     ui.checkbox(&mut self.dark_mode, theme_mode.toggle_label_kr());
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if let Some(gpu_info) = self.detected_gpus.get(self.selected_gpu_idx) {
-                            let gpu_btn = egui::Button::new(
-                                egui::RichText::new(gpu_info.short_badge_text())
-                                    .size(10.0)
-                                    .strong()
-                                    .color(egui::Color32::from_rgb(22, 101, 52)),
-                            )
-                            .fill(egui::Color32::from_rgb(220, 252, 231))
-                            .stroke(egui::Stroke::new(
-                                1.0_f32,
-                                egui::Color32::from_rgb(34, 197, 94),
-                            ))
-                            .corner_radius(4.0);
-                            if ui
-                                .add(gpu_btn)
-                                .on_hover_text(
-                                    "NVIDIA / AMD 외장 GPU 하드웨어 가속 활성 (클릭 시 장착된 GPU 어댑터 전환)",
-                                )
-                                .clicked()
-                                && !self.detected_gpus.is_empty()
-                            {
-                                self.selected_gpu_idx =
-                                    (self.selected_gpu_idx + 1) % self.detected_gpus.len();
-                            }
-                            ui.separator();
-                        }
+                        let _ = self.selected_gpu_idx;
+                        let _ = &self.detected_gpus;
                         if let Some(slot) = self.slots.get(self.selected_slot_idx) {
                             ui.colored_label(
                                 muted,
@@ -1549,6 +1669,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
 
     let mut verify_all = false;
+    let mut self_audit = false;
     let mut screenshot_dir: Option<PathBuf> = None;
     let mut capture_window_path: Option<PathBuf> = None;
     let mut initial_tab: Option<WorkflowTab> = None;
@@ -1568,6 +1689,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match args[i].as_str() {
             "--verify-all" | "--export-golden" => {
                 verify_all = true;
+            }
+            "--self-audit" => {
+                self_audit = true;
             }
             "--screenshot-tour" if i + 1 < args.len() => {
                 screenshot_dir = Some(PathBuf::from(&args[i + 1]));
@@ -1628,6 +1752,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         }
         i += 1;
+    }
+
+    if self_audit {
+        let audit_results = self_auditor::run_autonomous_self_audit();
+        println!(
+            "=== STRATA · 동국유물실측 SelfAuditor 14대 정밀 감사 결과 (A1~A5 · D1~D5 · P1~P4) ==="
+        );
+        let mut all_passed = true;
+        for r in &audit_results {
+            let status = if r.passed { "PASS" } else { "FAIL" };
+            if !r.passed {
+                all_passed = false;
+            }
+            println!(
+                "[{}] {} ({}) — {}: {}",
+                status, r.gate_id, r.category, r.title, r.detail
+            );
+        }
+        if !all_passed {
+            std::process::exit(1);
+        }
+        return Ok(());
     }
 
     if verify_all || screenshot_dir.is_some() {

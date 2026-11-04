@@ -1,6 +1,6 @@
 use crate::fracture_seg::SherdSegmentation;
 use serde::{Deserialize, Serialize};
-use strata_core::{HandleAttachmentKind, SurfaceRegion, TriMesh};
+use strata_core::{HandleAttachmentKind, Mat4, SurfaceRegion, TriMesh};
 
 /// Huber IRLS 법선 공면성 기반 회전축 및 물레속선(`Rills`) 경사각 복원 결과.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -243,4 +243,146 @@ pub fn analyze_special_vessel_part(mesh: &TriMesh) -> SpecialPartDiagnostics {
         is_lid_knob_on_top: top_center_count >= 8,
         fenestrated_open_cut_count,
     }
+}
+
+/// 유물편(`Potsherd`)의 3×3 정점 공분산 행렬 고유분해($\lambda_1 \ge \lambda_2 \ge \lambda_3$)를 통해
+/// 최소 분산 두께 축($\mathbf{e}_3$)을 정면 시선 축(`Y`), 폭 축($\mathbf{e}_2$)을 수평 축(`X`),
+/// 최대 길이·높이 축($\mathbf{e}_1$)을 수직 축(`+Z`)으로 정렬하여 바닥에 누운 파편을 똑바로 세운다 (`Task A-1` & `A6`).
+pub fn orient_potsherd_pca_upright(mesh: &TriMesh) -> TriMesh {
+    if mesh.positions.len() < 4 || mesh.ap2_cut_offset_mm.is_some() {
+        return mesh.clone();
+    }
+
+    let n = mesh.positions.len() as f64;
+    let mut mean = [0.0_f64; 3];
+    for p in &mesh.positions {
+        mean[0] += p[0];
+        mean[1] += p[1];
+        mean[2] += p[2];
+    }
+    mean[0] /= n;
+    mean[1] /= n;
+    mean[2] /= n;
+
+    let mut cov = [[0.0_f64; 3]; 3];
+    for p in &mesh.positions {
+        let d = [p[0] - mean[0], p[1] - mean[1], p[2] - mean[2]];
+        for r in 0..3 {
+            for c in 0..3 {
+                cov[r][c] += d[r] * d[c];
+            }
+        }
+    }
+    for row in &mut cov {
+        for val in row {
+            *val /= n;
+        }
+    }
+
+    // 3x3 대칭 행렬 Jacobi 고유분해
+    let mut v = [[1.0_f64, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut a = cov;
+    for _sweep in 0..25 {
+        let mut max_off = 0.0_f64;
+        let mut p_idx = 0usize;
+        let mut q_idx = 1usize;
+        for (r, row) in a.iter().enumerate() {
+            for (c, &val) in row.iter().enumerate().skip(r + 1) {
+                if val.abs() > max_off {
+                    max_off = val.abs();
+                    p_idx = r;
+                    q_idx = c;
+                }
+            }
+        }
+        if max_off < 1e-11 {
+            break;
+        }
+        let app = a[p_idx][p_idx];
+        let aqq = a[q_idx][q_idx];
+        let apq = a[p_idx][q_idx];
+        let tau = (aqq - app) / (2.0 * apq);
+        let t = if tau >= 0.0 {
+            1.0 / (tau + (1.0 + tau * tau).sqrt())
+        } else {
+            -1.0 / (-tau + (1.0 + tau * tau).sqrt())
+        };
+        let cs = 1.0 / (1.0 + t * t).sqrt();
+        let sn = t * cs;
+
+        a[p_idx][p_idx] = app - t * apq;
+        a[q_idx][q_idx] = aqq + t * apq;
+        a[p_idx][q_idx] = 0.0;
+        a[q_idx][p_idx] = 0.0;
+
+        for k in 0..3 {
+            if k != p_idx && k != q_idx {
+                let akp = a[k][p_idx];
+                let akq = a[k][q_idx];
+                a[k][p_idx] = cs * akp - sn * akq;
+                a[p_idx][k] = a[k][p_idx];
+                a[k][q_idx] = sn * akp + cs * akq;
+                a[q_idx][k] = a[k][q_idx];
+            }
+            let vkp = v[k][p_idx];
+            let vkq = v[k][q_idx];
+            v[k][p_idx] = cs * vkp - sn * vkq;
+            v[k][q_idx] = sn * vkp + cs * vkq;
+        }
+    }
+
+    let mut order = [0usize, 1, 2];
+    order.sort_by(|&i, &j| {
+        a[j][j]
+            .partial_cmp(&a[i][i])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let col = |idx: usize| -> [f64; 3] { [v[0][idx], v[1][idx], v[2][idx]] };
+    let mut e1 = col(order[0]); // 최대 분산 축 -> 수평 X (잔존폭)
+    let mut e3 = col(order[2]); // 최소 분산 축 -> 수직 +Z (잔존고/두께)
+
+    if e3[2] < -1e-6 || (e3[2].abs() <= 1e-6 && e3[1] < 0.0) {
+        e3 = [-e3[0], -e3[1], -e3[2]];
+    }
+    if e1[0] < -1e-6 || (e1[0].abs() <= 1e-6 && e1[1] < 0.0) {
+        e1 = [-e1[0], -e1[1], -e1[2]];
+    }
+    // 오른손 직교좌표계(det = +1): Y축(e2) = Z축(e3) × X축(e1)
+    let mut e2 = [
+        e3[1] * e1[2] - e3[2] * e1[1],
+        e3[2] * e1[0] - e3[0] * e1[2],
+        e3[0] * e1[1] - e3[1] * e1[0],
+    ];
+    let len2 = (e2[0] * e2[0] + e2[1] * e2[1] + e2[2] * e2[2])
+        .sqrt()
+        .max(1e-12);
+    e2 = [e2[0] / len2, e2[1] / len2, e2[2] / len2];
+
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut min_z = f64::INFINITY;
+    for p in &mesh.positions {
+        let rx = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+        let ry = e2[0] * p[0] + e2[1] * p[1] + e2[2] * p[2];
+        let rz = e3[0] * p[0] + e3[1] * p[1] + e3[2] * p[2];
+        min_x = min_x.min(rx);
+        max_x = max_x.max(rx);
+        min_y = min_y.min(ry);
+        max_y = max_y.max(ry);
+        min_z = min_z.min(rz);
+    }
+    let tx = -0.5 * (min_x + max_x);
+    let ty = -0.5 * (min_y + max_y);
+    let tz = -min_z;
+
+    let mat = Mat4 {
+        m: [
+            e1[0], e1[1], e1[2], tx, e2[0], e2[1], e2[2], ty, e3[0], e3[1], e3[2], tz, 0.0, 0.0,
+            0.0, 1.0,
+        ],
+    };
+    mesh.transformed(&mat)
 }

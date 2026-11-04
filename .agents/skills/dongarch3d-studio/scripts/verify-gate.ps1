@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   STRATA · DongArch3D Studio 통합 검증 게이트 실행 스크립트 (Antigravity CLI 표준)
 
@@ -59,10 +59,11 @@ try {
         Write-Host ("PASS: {0} ({1:N1}s)" -f $Title, $sw.Elapsed.TotalSeconds) -ForegroundColor Green
     }
 
-    Invoke-Step -Title "[1/5] cargo fmt-check" -CargoArgs @("fmt", "--all", "--", "--check")
-    Invoke-Step -Title "[2/5] cargo verify-v1 (clippy -D warnings)" -CargoArgs @("clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
-    Invoke-Step -Title "[3/5] cargo test --workspace (dev profile)" -CargoArgs @("test", "--workspace")
-    Invoke-Step -Title "[4/5] V1~V8 headless verification harness" -CargoArgs @("run", "--release", "-p", "strata-studio", "--", "--verify-all")
+    Invoke-Step -Title "[1/6] cargo fmt-check" -CargoArgs @("fmt", "--all", "--", "--check")
+    Invoke-Step -Title "[2/6] cargo verify-v1 (clippy -D warnings)" -CargoArgs @("clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
+    Invoke-Step -Title "[3/6] cargo test --workspace (dev profile)" -CargoArgs @("test", "--workspace")
+    Invoke-Step -Title "[4/6] V1~V8 headless verification harness" -CargoArgs @("run", "--release", "-p", "strata-studio", "--", "--verify-all")
+    Invoke-Step -Title "[5/6] SelfAuditor 14-gate autonomous audit (A1~A5, D1~D5, P1~P4)" -CargoArgs @("run", "--release", "-p", "strata-studio", "--", "--self-audit")
 
     if (-not $SkipCapture) {
         $resolvedCap = if ([System.IO.Path]::IsPathRooted($CapturePath)) {
@@ -77,7 +78,7 @@ try {
         if (Test-Path $resolvedCap) {
             Remove-Item $resolvedCap -Force
         }
-        Invoke-Step -Title "[5/5] Native window swapchain capture (--capture-window)" -CargoArgs @(
+        Invoke-Step -Title "[6/6] Native window swapchain capture (--capture-window)" -CargoArgs @(
             "run", "--release", "-p", "strata-studio", "--", "--tab", "$Tab", "--capture-window", $resolvedCap
         )
         if (-not (Test-Path $resolvedCap)) {
