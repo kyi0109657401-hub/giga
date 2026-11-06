@@ -201,5 +201,59 @@ pub fn render_orthographic_rubbing_image(
         }
     }
 
+    suppress_isolated_ink_speckles(&mut img);
     img
+}
+
+/// 정밀 탁본 래스터에서 한지 여백·평탄면 위의 1~2px 고립 점묘 잡음(Isolated speckle)만 제거하고
+/// 연속된 선각·능선 먹선은 그대로 보존한다 (`REFERENCE_CORPUS_PLAN.md` B2 배경 청결도 ≥ 98% 기준).
+pub fn suppress_isolated_ink_speckles(img: &mut RgbaImage) {
+    let w = img.width();
+    let h = img.height();
+    if w < 3 || h < 3 {
+        return;
+    }
+    let src = img.clone();
+    for y in 1..(h - 1) {
+        for x in 1..(w - 1) {
+            let p = src.get_pixel(x, y).0;
+            if p[3] < 200 || p[0] >= 180 {
+                continue;
+            }
+            let mut ink_neighbors = 0u32;
+            let mut paper_neighbors = 0u32;
+            let mut sum_r = 0u32;
+            let mut sum_g = 0u32;
+            let mut sum_b = 0u32;
+
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let np = src
+                        .get_pixel((x as i32 + dx) as u32, (y as i32 + dy) as u32)
+                        .0;
+                    if np[3] >= 200 {
+                        if np[0] < 195 {
+                            ink_neighbors += 1;
+                        } else if np[0] >= 215 {
+                            paper_neighbors += 1;
+                            sum_r += u32::from(np[0]);
+                            sum_g += u32::from(np[1]);
+                            sum_b += u32::from(np[2]);
+                        }
+                    }
+                }
+            }
+
+            // 8방 이웃 중 먹 픽셀이 0개이고 주변 6개 이상이 한지 배경이면 고립 점묘 잡음으로 판정
+            if ink_neighbors == 0 && paper_neighbors >= 6 {
+                let r = (sum_r / paper_neighbors) as u8;
+                let g = (sum_g / paper_neighbors) as u8;
+                let b = (sum_b / paper_neighbors) as u8;
+                img.put_pixel(x, y, Rgba([r, g, b, p[3]]));
+            }
+        }
+    }
 }

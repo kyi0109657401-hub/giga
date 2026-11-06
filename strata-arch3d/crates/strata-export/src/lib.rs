@@ -8,7 +8,8 @@ pub use dxf_table_export::{
     export_measurements_to_csv, export_measurements_to_markdown, export_plate_to_dxf_r12,
 };
 pub use pdf_tiled_print::{
-    compute_tiled_print_plan, render_plate_to_pdf_bytes, PaperSheetSize, TiledPrintPlan,
+    compute_tiled_print_plan, render_plate_to_pdf_bytes, render_plate_to_pdf_bytes_with_options,
+    PaperSheetSize, PdfPlateExportOptions, PdfRubbingRaster, TiledPrintPlan,
 };
 pub use plate_composer::{
     append_artifact_label_block, append_section_hatching, append_site_north_arrow,
@@ -22,10 +23,11 @@ pub use plate_composer::{
 pub use ret_exporter::{export_ret_folder_package, RetPackageManifest};
 pub use svg_illustrator::{
     base64_encode, canonical_ai_stroke_width_mm, render_plate_to_illustrator_svg,
-    render_plate_to_illustrator_svg_with_meta, render_plate_to_illustrator_svg_with_options,
-    render_plate_to_illustrator_svg_with_photos,
+    render_plate_to_illustrator_svg_with_ink_color, render_plate_to_illustrator_svg_with_meta,
+    render_plate_to_illustrator_svg_with_options, render_plate_to_illustrator_svg_with_photos,
     render_plate_to_illustrator_svg_with_rubbings_and_photos, PhotoSlot, RubbingPngSlot,
-    AI_STANDARD_10_LAYER_GROUPS, AI_STANDARD_LINE_WEIGHTS_PT_MM,
+    AI_STANDARD_10_LAYER_GROUPS, AI_STANDARD_9_LINE_WEIGHTS_PT_MM, AI_STANDARD_LINE_WEIGHTS_PT_MM,
+    DEFAULT_PLATE_INK_HEX, REFERENCE_SEPIA_INK_HEX,
 };
 
 #[cfg(test)]
@@ -993,6 +995,168 @@ mod tests {
         assert!(
             !pdf.contains("6E6A62") && !pdf.contains("6e6a62"),
             "PDF에 화면 보조 회색이 스며들면 안 됨"
+        );
+    }
+
+    #[test]
+    fn test_ai_standard_9_line_weights_and_sepia_ink_option() {
+        assert_eq!(AI_STANDARD_9_LINE_WEIGHTS_PT_MM.len(), 9);
+        let pts: Vec<f64> = AI_STANDARD_9_LINE_WEIGHTS_PT_MM
+            .iter()
+            .map(|(pt, _)| *pt)
+            .collect();
+        assert_eq!(
+            pts,
+            vec![1.00, 0.80, 0.50, 0.40, 0.30, 0.20, 0.15, 0.12, 0.10]
+        );
+        assert_eq!(DEFAULT_PLATE_INK_HEX, "#141413");
+        assert_eq!(REFERENCE_SEPIA_INK_HEX, "#231816");
+
+        let mut plate = minimal_test_plate();
+        plate.paths.push(PlatePathElement {
+            layer_id: String::from("외면_외곽선"),
+            points_mm: vec![[10.0, 10.0], [40.0, 10.0], [40.0, 30.0]],
+            closed: false,
+            stroke_hex: String::from("#141413"),
+            stroke_width_mm: 0.176,
+            dash_pattern_mm: None,
+            fill_hex: None,
+        });
+        plate.paths.push(PlatePathElement {
+            layer_id: String::from("횡단면_실측윤곽선"),
+            points_mm: vec![[12.0, 12.0], [32.0, 12.0]],
+            closed: false,
+            stroke_hex: String::from("#B5573A"),
+            stroke_width_mm: 0.24,
+            dash_pattern_mm: None,
+            fill_hex: None,
+        });
+
+        let default_svg = render_plate_to_illustrator_svg(&plate);
+        assert!(default_svg.contains("#141413"));
+
+        let sepia_svg = render_plate_to_illustrator_svg_with_ink_color(
+            &plate,
+            "sepia-test",
+            false,
+            REFERENCE_SEPIA_INK_HEX,
+        );
+        assert!(
+            sepia_svg.contains("#231816"),
+            "세피아 먹색 옵션 적용 시 #231816이 출력되어야 함"
+        );
+        assert!(
+            sepia_svg.contains("#B5573A"),
+            "비먹색(테라코타 등)은 세피아 먹색 변환 시 유지되어야 함"
+        );
+    }
+
+    #[test]
+    fn test_pdf_respects_scale_preset_and_embeds_rubbing_and_metadata() {
+        use strata_core::ScalePreset;
+
+        let mut plate_1to1 = minimal_test_plate();
+        plate_1to1.scale_preset = ScalePreset::Full1To1;
+        plate_1to1.paths.clear();
+        plate_1to1.paths.push(PlatePathElement {
+            layer_id: String::from("단면_윤곽선"),
+            points_mm: vec![[0.0, 0.0], [100.0, 0.0]],
+            closed: false,
+            stroke_hex: String::from("#141413"),
+            stroke_width_mm: 0.28,
+            dash_pattern_mm: None,
+            fill_hex: None,
+        });
+
+        let mut plate_half = plate_1to1.clone();
+        plate_half.scale_preset = ScalePreset::Half1To2;
+
+        let pdf_1to1 = String::from_utf8_lossy(&render_plate_to_pdf_bytes(
+            &plate_1to1,
+            PaperSheetSize::A4Portrait,
+            10.0,
+        ))
+        .into_owned();
+        let pdf_half = String::from_utf8_lossy(&render_plate_to_pdf_bytes(
+            &plate_half,
+            PaperSheetSize::A4Portrait,
+            10.0,
+        ))
+        .into_owned();
+
+        // 1:1 에서는 margin(15mm = 42.52pt) + 100mm(283.46pt) = 325.98pt
+        // 1:2 에서는 margin(15mm = 42.52pt) + 50mm(141.73pt) = 184.25pt
+        assert!(
+            pdf_1to1.contains("325.98 "),
+            "1:1 PDF 경로가 100mm 좌표를 반영해야 함: {pdf_1to1}"
+        );
+        assert!(
+            pdf_half.contains("184.25 "),
+            "1:2 PDF 경로가 축척 비율(0.5)을 반영해야 함: {pdf_half}"
+        );
+
+        let opts = PdfPlateExportOptions {
+            artifact_id: Some(String::from("000115")),
+            plate_no: Some(String::from("도면 18")),
+            note: Some(String::from("유물재질, 결실부분 확인요함")),
+            rubbing_rasters: vec![PdfRubbingRaster {
+                rect_mm: [10.0, 10.0, 50.0, 50.0],
+                width_px: 4,
+                height_px: 4,
+                gray_bytes: vec![180u8; 16],
+            }],
+        };
+        let pdf_with_opts = String::from_utf8_lossy(&render_plate_to_pdf_bytes_with_options(
+            &plate_half,
+            PaperSheetSize::A4Portrait,
+            10.0,
+            &opts,
+        ))
+        .into_owned();
+
+        assert!(pdf_with_opts.contains("/Subtype /Image"));
+        assert!(pdf_with_opts.contains("/ColorSpace /DeviceGray"));
+        assert!(pdf_with_opts.contains("artifact_id=000115"));
+        assert!(pdf_with_opts.contains("plate_no=도면 18"));
+
+        // 경계값 검증: 0 크기/빈 래스터와 개행 포함 메모가 들어와도 /Width 0 객체나 줄바꿈 오염이 없어야 함
+        let edge_opts = PdfPlateExportOptions {
+            artifact_id: Some(String::from("000115\n주석오염방지")),
+            plate_no: Some(String::from("도면 18")),
+            note: Some(String::from("첫째줄\r\n둘째줄")),
+            rubbing_rasters: vec![
+                PdfRubbingRaster {
+                    rect_mm: [0.0, 0.0, 10.0, 10.0],
+                    width_px: 0,
+                    height_px: 4,
+                    gray_bytes: Vec::new(),
+                },
+                PdfRubbingRaster {
+                    rect_mm: [10.0, 10.0, 50.0, 50.0],
+                    width_px: 2,
+                    height_px: 2,
+                    gray_bytes: vec![120u8; 4],
+                },
+            ],
+        };
+        let pdf_edge = String::from_utf8_lossy(&render_plate_to_pdf_bytes_with_options(
+            &plate_half,
+            PaperSheetSize::A4Portrait,
+            10.0,
+            &edge_opts,
+        ))
+        .into_owned();
+        assert!(
+            !pdf_edge.contains("/Width 0"),
+            "0 크기 래스터가 XObject로 방출되면 안 됨"
+        );
+        assert!(
+            pdf_edge.contains("/Im1 5 0 R") && !pdf_edge.contains("/Im2"),
+            "유효한 래스터 1개만 /Im1로 매핑되어야 함: {pdf_edge}"
+        );
+        assert!(
+            pdf_edge.contains("note=첫째줄 둘째줄"),
+            "개행 문자가 단일 주석 줄로 치환되어야 함"
         );
     }
 }

@@ -5,7 +5,7 @@ pub mod ply_stl;
 
 pub use ap2_codec::{Ap2CutPlaneGroup, Ap2Project};
 pub use darch_codec::DarchProject;
-pub use obj_loader::{load_obj_file, LoadedObjBundle};
+pub use obj_loader::{downsample_rgba_box_filter, load_obj_file, LoadedObjBundle};
 pub use ply_stl::load_ply_or_stl_file;
 
 use std::path::Path;
@@ -185,5 +185,68 @@ mod tests {
             assert!((ext[2] - 63.133).abs() < 0.1, "auto-aligned Z={}", ext[2]);
             assert_eq!(mesh.ap2_cut_offset_mm, Some(18.0));
         }
+    }
+
+    #[test]
+    fn test_downsample_rgba_box_filter_reduces_aliasing_and_vn_zero_normals_valid() {
+        // 1) 4x4 체커보드(0 과 200 교차)를 2x2로 축소할 때:
+        //    단순 점 샘플링(nearest)이면 모두 0이 되지만, 2x2 박스 평균 필터면 평균값 100이 나와야 한다.
+        let mut src = vec![0u8; 4 * 4 * 4];
+        for y in 0..4u32 {
+            for x in 0..4u32 {
+                let v = if (x + y) % 2 == 0 { 0u8 } else { 200u8 };
+                let idx = ((y * 4 + x) * 4) as usize;
+                src[idx] = v;
+                src[idx + 1] = v;
+                src[idx + 2] = v;
+                src[idx + 3] = 255;
+            }
+        }
+        let down = downsample_rgba_box_filter(&src, 4, 4, 2);
+        assert_eq!(down.width, 2);
+        assert_eq!(down.height, 2);
+        for chunk in down.rgba.chunks_exact(4) {
+            assert_eq!(
+                chunk[0], 100,
+                "2x2 박스 평균 다운샘플링 결과는 체커보드 평균(100)이어야 함"
+            );
+            assert_eq!(chunk[3], 255);
+        }
+
+        // 2) vn 라인이 0개인 OBJ 파일을 로드했을 때:
+        //    had_vertex_normals_in_file == false 이고 자동 생성된 정점 법선이 모두 단위벡터(|n| ≈ 1.0)여야 한다.
+        let tmp_obj = std::env::temp_dir().join("strata_vn_zero_test.obj");
+        let obj_text = "\
+v 0.0 0.0 0.0\n\
+v 20.0 0.0 0.0\n\
+v 0.0 20.0 0.0\n\
+vt 0.0 0.0\n\
+vt 1.0 0.0\n\
+vt 0.0 1.0\n\
+f 1/1 2/2 3/3\n";
+        std::fs::write(&tmp_obj, obj_text).expect("write temp obj");
+        let bundle = load_obj_file(&tmp_obj).expect("load vn=0 obj");
+        let _ = std::fs::remove_file(&tmp_obj);
+
+        assert!(
+            !bundle.had_vertex_normals_in_file,
+            "vn=0 파일임을 명시적으로 기록해야 함"
+        );
+        assert_eq!(bundle.mesh.normals.len(), 3);
+        for n in &bundle.mesh.normals {
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            assert!(
+                (len - 1.0).abs() < 1e-6,
+                "자동 생성된 법선은 단위벡터여야 함: {n:?}"
+            );
+        }
+
+        // 3) 경계값 안전성: src_w=0 또는 짧은 버퍼가 들어와도 패닉 없이 빈 텍스처를 반환해야 한다.
+        let zero_w = downsample_rgba_box_filter(&[], 0, 8192, 4096);
+        assert_eq!(zero_w.width, 0);
+        assert!(zero_w.rgba.is_empty());
+        let short_buf = downsample_rgba_box_filter(&[1, 2, 3], 16, 16, 4);
+        assert_eq!(short_buf.width, 0);
+        assert!(short_buf.rgba.is_empty());
     }
 }

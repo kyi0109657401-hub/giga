@@ -6,8 +6,8 @@ pub mod unroll;
 pub use feature_lines::{extract_five_feature_lines, FeatureLineKind, FeatureSegment2D};
 pub use hemp_fft::{measure_hemp_cloth_threads_per_cm, HempThreadCountResult};
 pub use rubbing_engine::{
-    compute_vertex_rubbing_ink_weights, render_orthographic_rubbing_image, RubbingAlgorithm,
-    RubbingRenderParams,
+    compute_vertex_rubbing_ink_weights, render_orthographic_rubbing_image,
+    suppress_isolated_ink_speckles, RubbingAlgorithm, RubbingRenderParams,
 };
 pub use unroll::{unroll_mesh_surface, UnrollMode, UnrollResult, UnrolledPoint2D};
 
@@ -134,5 +134,53 @@ mod tests {
             [250, 249, 245, 0],
             "삼각형 내부는 칠해져야 함: {inside:?} at ({ix},{iy})"
         );
+    }
+
+    #[test]
+    fn test_suppress_isolated_rubbing_speckles_preserves_continuous_strokes() {
+        use image::{Rgba, RgbaImage};
+
+        // 32x32 한지 배경(#FAF9F5) 위에:
+        // 1) 고립 점묘 잡음(Isolated 1px speckles) 10개
+        // 2) 연속된 1px 두께 가로 먹선(x = 4..=27, y = 16)
+        let mut img = RgbaImage::from_pixel(32, 32, Rgba([248, 247, 243, 255]));
+        let speckle_coords = [
+            (3, 3),
+            (8, 4),
+            (15, 5),
+            (22, 6),
+            (28, 7),
+            (4, 25),
+            (10, 26),
+            (17, 27),
+            (23, 28),
+            (29, 24),
+        ];
+        for &(sx, sy) in &speckle_coords {
+            img.put_pixel(sx, sy, Rgba([28, 28, 26, 255]));
+        }
+        for x in 4..=27 {
+            img.put_pixel(x, 16, Rgba([24, 24, 22, 255]));
+        }
+
+        suppress_isolated_ink_speckles(&mut img);
+
+        // 모든 고립 점묘 잡음은 제거되어 배경 청결도 >= 98% 달성
+        for &(sx, sy) in &speckle_coords {
+            let p = img.get_pixel(sx, sy).0;
+            assert!(
+                p[0] >= 225,
+                "고립 점묘 잡음 ({sx},{sy})이 제거되어야 함, 실제 픽셀={p:?}"
+            );
+        }
+
+        // 연속된 선각 먹선(내부 구간 x = 5..=26, y = 16)은 100% 보존
+        for x in 5..=26 {
+            let p = img.get_pixel(x, 16).0;
+            assert!(
+                p[0] <= 40,
+                "연속된 능선 먹선 ({x},16)은 보존되어야 함, 실제 픽셀={p:?}"
+            );
+        }
     }
 }

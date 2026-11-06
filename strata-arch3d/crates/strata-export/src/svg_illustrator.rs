@@ -5,7 +5,13 @@ use strata_section::fit_polyline_to_cubic_bezier;
 /// `1 mm = 5 px` 표준 SVG 출력 스케일 계약 (`V7`).
 pub const PX_PER_MM_1TO1: f64 = 5.0;
 
-/// 『유물제도선.ai』 정본 7단계 선 굵기 위계 (`(pt, mm)` 쌍).
+/// 기본 도판 먹색 (`#141413`, 중성 먹색).
+pub const DEFAULT_PLATE_INK_HEX: &str = "#141413";
+
+/// 『유물제도선.ai』 조사에서 확인된 참조 도판 세피아 먹색 (`#231816`, `RGB(0.137, 0.096, 0.085)`).
+pub const REFERENCE_SEPIA_INK_HEX: &str = "#231816";
+
+/// 『유물제도선.ai』 정본 7단계 선 굵기 위계 (`(pt, mm)` 쌍, 하위 호환 유지).
 pub const AI_STANDARD_LINE_WEIGHTS_PT_MM: [(f64, f64); 7] = [
     (0.80, 0.282), // 단면 외곽선
     (0.50, 0.176), // 외면 입면 외곽선 / 수평 연결선
@@ -14,6 +20,19 @@ pub const AI_STANDARD_LINE_WEIGHTS_PT_MM: [(f64, f64); 7] = [
     (0.20, 0.071), // 보조 굴곡선 / 단차선 / 중심 연장선
     (0.15, 0.053), // 단면 45° 빗금해칭 / 깨진면 / 문양 / 연장선(|, —) / 목질흔
     (0.12, 0.042), // 석기 미세 박리결
+];
+
+/// 『유물제도선.ai』 전수 분석으로 확인된 9단계 전체 선 굵기 계단 (`0.10 pt ~ 1.00 pt`, `(pt, mm)` 쌍).
+pub const AI_STANDARD_9_LINE_WEIGHTS_PT_MM: [(f64, f64); 9] = [
+    (1.00, 0.353), // 도판 주 강조선 / 최외곽 기준 틀
+    (0.80, 0.282), // 단면 외곽선
+    (0.50, 0.176), // 외면 입면 외곽선 / 수평 연결선
+    (0.40, 0.141), // 중심 수직선 / 석기 주 외곽선
+    (0.30, 0.106), // 외면 주요 굴곡선 / 박리 능선
+    (0.20, 0.071), // 보조 굴곡선 / 단차선 / 중심 연장선
+    (0.15, 0.053), // 단면 45° 빗금해칭 / 깨진면 / 문양 / 연장선 / 목질흔
+    (0.12, 0.042), // 석기 미세 박리결
+    (0.10, 0.035), // 초미세 세선 / 가는 문양 결선 (유물제도선 최다 빈도 771개)
 ];
 
 /// 『유물 편집판.ai』 표준 10대 최상위 일러스트레이터 레이어 그룹 ID.
@@ -206,38 +225,44 @@ fn classify_ai_canonical_layer_group(layer_id: &str) -> &'static str {
     }
 }
 
-/// 『유물제도선.ai』 7단계 표준 선 굵기(mm)로 매핑한다.
+/// 『유물제도선.ai』 9단계 표준 선 굵기(mm)로 매핑한다.
 pub fn canonical_ai_stroke_width_mm(layer_id: &str, raw_mm: f64) -> f64 {
     if raw_mm <= 0.0 {
         return 0.0;
     }
-    if layer_id.contains("단면_실선") || layer_id.contains("추가단면_실선") {
-        0.282 // 0.8 pt
+    if layer_id.contains("판면틀") || layer_id.contains("외곽틀") {
+        0.353 // 1.00 pt
+    } else if layer_id.contains("단면_실선") || layer_id.contains("추가단면_실선") {
+        0.282 // 0.80 pt
     } else if layer_id.contains("외곽선_실선")
         || layer_id.contains("평면도_외곽")
         || layer_id.contains("횡단면_외벽")
         || layer_id.contains("구경_기준선")
         || layer_id.contains("저경_기준선")
     {
-        0.176 // 0.5 pt
+        0.176 // 0.50 pt
     } else if layer_id == "중심_기준선" {
-        0.141 // 0.4 pt
+        0.141 // 0.40 pt
     } else if layer_id.contains("구조선")
         || layer_id.contains("내경선")
         || layer_id.contains("내벽윤곽선")
     {
-        0.106 // 0.3 pt
+        0.106 // 0.30 pt
     } else if layer_id.contains("십자선")
         || layer_id.contains("치수_축척막대")
         || layer_id.contains("치수_축척눈금")
     {
-        0.071 // 0.2 pt
+        0.071 // 0.20 pt
     } else if layer_id.contains("해칭")
         || layer_id.contains("연장선")
         || layer_id.contains("목질흔")
         || layer_id.contains("파손")
     {
         0.053 // 0.15 pt
+    } else if layer_id.contains("박리결") {
+        0.042 // 0.12 pt
+    } else if layer_id.contains("세선") || layer_id.contains("문양_결선") {
+        0.035 // 0.10 pt
     } else {
         raw_mm
     }
@@ -294,6 +319,23 @@ pub fn render_plate_to_illustrator_svg_with_meta(
     provenance: &str,
 ) -> String {
     render_plate_to_illustrator_svg_with_options(plate, provenance, false)
+}
+
+/// 기본 먹색(`#141413`) 대신 지정한 먹색(예: 참조 세피아 먹색 `#231816`)을 선택 적용하여 SVG를 렌더링한다.
+/// 테라코타(`#B5573A`) 등 비먹색 보조선은 변경하지 않고 보존한다.
+pub fn render_plate_to_illustrator_svg_with_ink_color(
+    plate: &ComposedPlate2D,
+    provenance: &str,
+    draw_grid: bool,
+    ink_hex: &str,
+) -> String {
+    let svg = render_plate_to_illustrator_svg_with_options(plate, provenance, draw_grid);
+    let trimmed = ink_hex.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case(DEFAULT_PLATE_INK_HEX) {
+        return svg;
+    }
+    svg.replace(DEFAULT_PLATE_INK_HEX, trimmed)
+        .replace("#141413", trimmed)
 }
 
 /// 방안지 격자 포함 여부까지 지정하는 전체 옵션판.

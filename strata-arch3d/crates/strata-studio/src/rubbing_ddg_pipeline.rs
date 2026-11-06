@@ -878,8 +878,10 @@ where
             }
         });
 
-    RgbaImage::from_raw(w, h, raw_rgba)
-        .unwrap_or_else(|| RgbaImage::from_pixel(w, h, Rgba([0, 0, 0, 0])))
+    let mut img = RgbaImage::from_raw(w, h, raw_rgba)
+        .unwrap_or_else(|| RgbaImage::from_pixel(w, h, Rgba([0, 0, 0, 0])));
+    strata_shade::suppress_isolated_ink_speckles(&mut img);
+    img
 }
 
 #[cfg(test)]

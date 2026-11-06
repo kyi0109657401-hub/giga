@@ -1,0 +1,644 @@
+{
+  "counts": {
+    "obj_sets": 11,
+    "reference_pdfs": 9,
+    "templates_and_baselines": 6,
+    "total_items": 26
+  },
+  "items": [
+    {
+      "display_name": "strata_plate_1to1.pdf",
+      "id": "aux-strata_plate_1to1",
+      "kind": "template_or_baseline",
+      "sha256": "a305d985fd6727f9ee4e1cdf5f9e4effd8ca721ec122acacb0fa1b13cef29bb1",
+      "size_bytes": 101878,
+      "source_path": "I:\\새 폴더 (11)\\strata_plate_1to1.pdf"
+    },
+    {
+      "display_name": "동국문화재축척및방위표.ai",
+      "id": "aux-동국문화재축척및방위표",
+      "kind": "template_or_baseline",
+      "sha256": "0ab4afdb8db91a47b0c72cf0bc5e9ec9db1ac2e47886e85a0a594965ce95e585",
+      "size_bytes": 1257685,
+      "source_path": "I:\\새 폴더 (11)\\동국문화재축척및방위표.ai"
+    },
+    {
+      "display_name": "목질흔.ai",
+      "id": "aux-목질흔",
+      "kind": "template_or_baseline",
+      "sha256": "69b681e2640b68b1320d1f159697ab9ecd2815b54d80590c90a73c0280f6caa4",
+      "size_bytes": 1094199,
+      "source_path": "I:\\새 폴더 (11)\\목질흔.ai"
+    },
+    {
+      "display_name": "유구편집판-A4.ai",
+      "id": "aux-유구편집판-A4",
+      "kind": "template_or_baseline",
+      "sha256": "2d4402899e9b529c71debdaff4d2e0f354f6a6b633985b14b66436fcfb99f909",
+      "size_bytes": 353920,
+      "source_path": "I:\\새 폴더 (11)\\유구편집판-A4.ai"
+    },
+    {
+      "display_name": "유물 편집판.ai",
+      "id": "aux-유물 편집판",
+      "kind": "template_or_baseline",
+      "sha256": "89415f8e9b3145b7c2a2768cbf70dab20eaf914d70e71e6fbb9b74580cb0a8aa",
+      "size_bytes": 13918889,
+      "source_path": "I:\\새 폴더 (11)\\유물 편집판.ai"
+    },
+    {
+      "display_name": "유물제도선.ai",
+      "id": "aux-유물제도선",
+      "kind": "template_or_baseline",
+      "sha256": "7b6290a08730bf75b7d97fcb8d39d0604929bb2df4cb61f487b5744f62746b48",
+      "size_bytes": 1136114,
+      "source_path": "I:\\새 폴더 (11)\\유물제도선.ai"
+    },
+    {
+      "ap2_present": true,
+      "display_name": "034(7-실4-4) / 7지구 9호-7.obj",
+      "folder": "034(7-실4-4)",
+      "id": "obj-034(7-실4-4)-7지구 9호-7",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          124.794,
+          73.63,
+          123.339
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 335824,
+        "uv_count": 170534,
+        "vertices": 167912
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "72426d0d0309fede45036b36425135455f54c48216cd664018d70044f0527cd6",
+      "size_bytes": 23225653,
+      "source_path": "I:\\새 폴더 (11)\\034(7-실4-4)\\7지구 9호-7.obj",
+      "texture": {
+        "height": 1024,
+        "path": "7지구 9호-7_1.jpg",
+        "sha256": "ec900979fbb9b6188c5c6ac8d5b82d17ee6ae83dda77938b509866f1b0dc27fc",
+        "size_bytes": 566247,
+        "width": 1024
+      },
+      "units": "mm"
+    },
+    {
+      "ap2_present": false,
+      "display_name": "1 / 1.obj",
+      "folder": "1",
+      "id": "obj-1-1",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          153.066,
+          150.567,
+          55.197
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 298090,
+        "uv_count": 149904,
+        "vertices": 149047
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "9a5a7de86933a70c60f5a229676506bc79aaefa25f0f14bbe4f1196be2c5ffc7",
+      "size_bytes": 20389469,
+      "source_path": "I:\\새 폴더 (11)\\1\\1.obj",
+      "texture": {
+        "height": 16384,
+        "path": "1_1.jpg",
+        "sha256": "4d1d2b58d6a93bf3e2f11b42cc825fea8cfed4f49f7cfd7235a41c41cddc2dff",
+        "size_bytes": 47042451,
+        "width": 16384
+      },
+      "units": "mm"
+    },
+    {
+      "ap2_present": false,
+      "display_name": "10 / 8.obj",
+      "folder": "10",
+      "id": "obj-10-8",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          82.33,
+          99.636,
+          24.558
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 129810,
+        "uv_count": 65625,
+        "vertices": 64907
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "994151c1d6ba982f39ec40188238dfdeb10d71c795ae4030aa360e8834ababab",
+      "size_bytes": 8536109,
+      "source_path": "I:\\새 폴더 (11)\\10\\8.obj",
+      "texture": {
+        "height": 16384,
+        "path": "8_1.jpg",
+        "sha256": "f267fc4b97e1dd359ecb69970bc81ddb00a27a75b4aab2da67fb17dc1b05daf9",
+        "size_bytes": 34812116,
+        "width": 16384
+      },
+      "units": "mm"
+    },
+    {
+      "ap2_present": false,
+      "display_name": "2 / 2.obj",
+      "folder": "2",
+      "id": "obj-2-2",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          168.234,
+          289.345,
+          38.202
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 1054754,
+        "uv_count": 529272,
+        "vertices": 527379
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "dede3f687e459a4527dc6a242a2b50db87501234e834f52928950832b2e2177d",
+      "size_bytes": 75832363,
+      "source_path": "I:\\새 폴더 (11)\\2\\2.obj",
+      "texture": {
+        "height": 16384,
+        "path": "2_1.jpg",
+        "sha256": "45898fb69c2281f3dc12e144f57f74754ca80c2513a85fa65691eda8b37de76a",
+        "size_bytes": 64086429,
+        "width": 16384
+      },
+      "units": "mm"
+    },
+    {
+      "ap2_present": false,
+      "display_name": "3 / 3.obj",
+      "folder": "3",
+      "id": "obj-3-3",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          330.215,
+          323.741,
+          71.196
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 1893140,
+        "uv_count": 958731,
+        "vertices": 946558
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "76af48751027ebb6dc02c1ff022d31b732065b7ea063d8c6a969ebf3515897d5",
+      "size_bytes": 137524484,
+      "source_path": "I:\\새 폴더 (11)\\3\\3.obj",
+      "texture": {
+        "height": 16384,
+        "path": "3_1.jpg",
+        "sha256": "cc36d4f229a6ba451ef31b37ecdb1f85819a52b63a7e780bd2fe0719e6048a6a",
+        "size_bytes": 70059708,
+        "width": 16384
+      },
+      "units": "mm"
+    },
+    {
+      "ap2_present": false,
+      "display_name": "4 / 4.obj",
+      "folder": "4",
+      "id": "obj-4-4",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          113.318,
+          183.78,
+          26.154
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 362920,
+        "uv_count": 182565,
+        "vertices": 181462
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "c02ebd87f6b66df137cc6ad2f44dc13605d7715718cfa1739c5804ae00524b34",
+      "size_bytes": 25090429,
+      "source_path": "I:\\새 폴더 (11)\\4\\4.obj",
+      "texture": {
+        "height": 16384,
+        "path": "4_1.jpg",
+        "sha256": "d1a9117264fa41e27a34576988422d647b615b7f79e45a9adf6a02a9deb5b2ea",
+        "size_bytes": 51833841,
+        "width": 16384
+      },
+      "units": "mm"
+    },
+    {
+      "ap2_present": false,
+      "display_name": "5 / 5.obj",
+      "folder": "5",
+      "id": "obj-5-5",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          68.153,
+          69.17,
+          23.047
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 50380,
+        "uv_count": 25586,
+        "vertices": 25192
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "f7e631fdd1f24dad1ec2552d51472b945a21ff568f2f019c4ebbf67f8800c3a4",
+      "size_bytes": 3216421,
+      "source_path": "I:\\새 폴더 (11)\\5\\5.obj",
+      "texture": {
+        "height": 16384,
+        "path": "5_1.jpg",
+        "sha256": "080d5e53b9f109fa4f608ca10d034ed44a8127e65f6a4fa0757faca22e30a2dd",
+        "size_bytes": 25518146,
+        "width": 16384
+      },
+      "units": "mm"
+    },
+    {
+      "ap2_present": false,
+      "display_name": "6 / 6.obj",
+      "folder": "6",
+      "id": "obj-6-6",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          128.023,
+          170.377,
+          42.3
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 415238,
+        "uv_count": 208901,
+        "vertices": 207621
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "2a19cb885b694d930568761c37072e227131e4095d38915a15c3757b40f7034d",
+      "size_bytes": 28946220,
+      "source_path": "I:\\새 폴더 (11)\\6\\6.obj",
+      "texture": {
+        "height": 16384,
+        "path": "6_1.jpg",
+        "sha256": "ff233dbea14ae11ad42424839e0964487b201a862c2cff5604fe52efe54d7172",
+        "size_bytes": 48127652,
+        "width": 16384
+      },
+      "units": "mm"
+    },
+    {
+      "ap2_present": false,
+      "display_name": "7 / 7.obj",
+      "folder": "7",
+      "id": "obj-7-7",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          58.983,
+          81.497,
+          31.793
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 59842,
+        "uv_count": 30390,
+        "vertices": 29923
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "a62cd3a28d203a99ebba36b04eee6f0e94b3b18770d9924e3b313c5e0a9fe927",
+      "size_bytes": 3859776,
+      "source_path": "I:\\새 폴더 (11)\\7\\7.obj",
+      "texture": {
+        "height": 16384,
+        "path": "7_1.jpg",
+        "sha256": "395031a45529cec89edbf9ec1b4475e47e46e867bda7cf049b12798414fd5406",
+        "size_bytes": 37440965,
+        "width": 16384
+      },
+      "units": "mm"
+    },
+    {
+      "ap2_present": false,
+      "display_name": "8 / 8.obj",
+      "folder": "8",
+      "id": "obj-8-8",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          78.404,
+          71.878,
+          37.263
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 65002,
+        "uv_count": 33051,
+        "vertices": 32503
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "bf9b91bf52355af74af4632e832084b55dfe6300ed965667967bd3eca4899df6",
+      "size_bytes": 4197672,
+      "source_path": "I:\\새 폴더 (11)\\8\\8.obj",
+      "texture": {
+        "height": 16384,
+        "path": "8_1.jpg",
+        "sha256": "3021ae1306bfc3695bfdfb53d3a6334aafe4999ef9a3e7bbc8dbe785ebb2705d",
+        "size_bytes": 30774895,
+        "width": 16384
+      },
+      "units": "mm"
+    },
+    {
+      "ap2_present": false,
+      "display_name": "9 / 7.obj",
+      "folder": "9",
+      "id": "obj-9-7",
+      "kind": "obj_set",
+      "mesh": {
+        "bbox_mm": [
+          62.355,
+          109.108,
+          20.517
+        ],
+        "has_normals": false,
+        "has_uv": true,
+        "normals_count": 0,
+        "triangles": 130712,
+        "uv_count": 66246,
+        "vertices": 65358
+      },
+      "rights": {
+        "owner": "내부 연구용",
+        "redistributable": false,
+        "status": "internal-research-only"
+      },
+      "sha256": "cb89ecc01083dd9b66a23973f4728cbf6dda683cd9032263e714e049cdcc2691",
+      "size_bytes": 8590521,
+      "source_path": "I:\\새 폴더 (11)\\9\\7.obj",
+      "texture": {
+        "height": 16384,
+        "path": "7_1.jpg",
+        "sha256": "d364833dad0962474c0c1c5f3720492ae4afb70eaf9f6602b353e87788777f4b",
+        "size_bytes": 40854626,
+        "width": 16384
+      },
+      "units": "mm"
+    },
+    {
+      "display_name": "디지털 탁본 소개_(주)캐럿펀트.pdf",
+      "id": "pdf-intro",
+      "kind": "reference_pdf",
+      "pdf": {
+        "first_page_pt": [
+          960.0,
+          540.0
+        ],
+        "image_objects": 44,
+        "pages": 12
+      },
+      "rights": {
+        "owner": "(주)캐럿펀트 / 내부 참고용",
+        "redistributable": false,
+        "status": "internal-reference-only"
+      },
+      "sha256": "bb1218d6317b5d40a02eed535ee84c87cafe76b2742987b6fc82e3e91a565d4e",
+      "size_bytes": 3436103,
+      "source_path": "I:\\디지털 탁본 참고 자료_(주)캐럿펀트\\디지털 탁본 소개_(주)캐럿펀트.pdf"
+    },
+    {
+      "display_name": "디지털 탁본(1).pdf",
+      "id": "pdf-plate-02",
+      "kind": "reference_pdf",
+      "pdf": {
+        "first_page_pt": [
+          1352.0,
+          1061.0
+        ],
+        "image_objects": 4,
+        "pages": 1
+      },
+      "rights": {
+        "owner": "(주)캐럿펀트 / 내부 참고용",
+        "redistributable": false,
+        "status": "internal-reference-only"
+      },
+      "sha256": "a5d35c347089ea4875bacc8e7e73a90d56b73ddc198ce485f9a6f7b3bc7a046f",
+      "size_bytes": 58819884,
+      "source_path": "I:\\디지털 탁본 참고 자료_(주)캐럿펀트\\디지털 탁본(1).pdf"
+    },
+    {
+      "display_name": "디지털 탁본(2).pdf",
+      "id": "pdf-plate-03",
+      "kind": "reference_pdf",
+      "pdf": {
+        "first_page_pt": [
+          1248.0,
+          556.0
+        ],
+        "image_objects": 2,
+        "pages": 1
+      },
+      "rights": {
+        "owner": "(주)캐럿펀트 / 내부 참고용",
+        "redistributable": false,
+        "status": "internal-reference-only"
+      },
+      "sha256": "a77ef348b903010c64df78ed651ac9fb9862fd406f25529fa42397ed11ffa9fc",
+      "size_bytes": 39802036,
+      "source_path": "I:\\디지털 탁본 참고 자료_(주)캐럿펀트\\디지털 탁본(2).pdf"
+    },
+    {
+      "display_name": "디지털 탁본(3).pdf",
+      "id": "pdf-plate-04",
+      "kind": "reference_pdf",
+      "pdf": {
+        "first_page_pt": [
+          1352.0,
+          1661.0
+        ],
+        "image_objects": 4,
+        "pages": 1
+      },
+      "rights": {
+        "owner": "(주)캐럿펀트 / 내부 참고용",
+        "redistributable": false,
+        "status": "internal-reference-only"
+      },
+      "sha256": "82135b302fb7de40e9516f13fbe2295cb2ebc64cf5f7cc8eaaf91b68c7271963",
+      "size_bytes": 43186240,
+      "source_path": "I:\\디지털 탁본 참고 자료_(주)캐럿펀트\\디지털 탁본(3).pdf"
+    },
+    {
+      "display_name": "디지털 탁본(4).pdf",
+      "id": "pdf-plate-05",
+      "kind": "reference_pdf",
+      "pdf": {
+        "first_page_pt": [
+          1540.0,
+          2464.0
+        ],
+        "image_objects": 6,
+        "pages": 1
+      },
+      "rights": {
+        "owner": "(주)캐럿펀트 / 내부 참고용",
+        "redistributable": false,
+        "status": "internal-reference-only"
+      },
+      "sha256": "3a967029c841a1b64ccd134e52330a000fb318b75a822b865cc93fa50c0d94a0",
+      "size_bytes": 131369591,
+      "source_path": "I:\\디지털 탁본 참고 자료_(주)캐럿펀트\\디지털 탁본(4).pdf"
+    },
+    {
+      "display_name": "디지털 탁본(5).pdf",
+      "id": "pdf-plate-06",
+      "kind": "reference_pdf",
+      "pdf": {
+        "first_page_pt": [
+          1895.9,
+          980.4
+        ],
+        "image_objects": 6,
+        "pages": 1
+      },
+      "rights": {
+        "owner": "(주)캐럿펀트 / 내부 참고용",
+        "redistributable": false,
+        "status": "internal-reference-only"
+      },
+      "sha256": "41b1d17de62bfb8741b9642fecd38d74a7c56d31282b1940f11d5ac7052262f3",
+      "size_bytes": 145678773,
+      "source_path": "I:\\디지털 탁본 참고 자료_(주)캐럿펀트\\디지털 탁본(5).pdf"
+    },
+    {
+      "display_name": "디지털 탁본(6).pdf",
+      "id": "pdf-plate-07",
+      "kind": "reference_pdf",
+      "pdf": {
+        "first_page_pt": [
+          1638.2,
+          1347.7
+        ],
+        "image_objects": 6,
+        "pages": 1
+      },
+      "rights": {
+        "owner": "(주)캐럿펀트 / 내부 참고용",
+        "redistributable": false,
+        "status": "internal-reference-only"
+      },
+      "sha256": "171da28c1530b908e822ad7c03a5501be18e39574162455f209759f6fe4ec109",
+      "size_bytes": 74755016,
+      "source_path": "I:\\디지털 탁본 참고 자료_(주)캐럿펀트\\디지털 탁본(6).pdf"
+    },
+    {
+      "display_name": "디지털 탁본(7).pdf",
+      "id": "pdf-plate-08",
+      "kind": "reference_pdf",
+      "pdf": {
+        "first_page_pt": [
+          2244.7,
+          1184.6
+        ],
+        "image_objects": 9,
+        "pages": 1
+      },
+      "rights": {
+        "owner": "(주)캐럿펀트 / 내부 참고용",
+        "redistributable": false,
+        "status": "internal-reference-only"
+      },
+      "sha256": "5e31113d3e03dd4a5a8fa105886ae271ba95fc3a6607450f11c5bb82afd7d07d",
+      "size_bytes": 106202600,
+      "source_path": "I:\\디지털 탁본 참고 자료_(주)캐럿펀트\\디지털 탁본(7).pdf"
+    },
+    {
+      "display_name": "디지털 탁본(8).pdf",
+      "id": "pdf-plate-09",
+      "kind": "reference_pdf",
+      "pdf": {
+        "first_page_pt": [
+          2402.4,
+          1077.2
+        ],
+        "image_objects": 6,
+        "pages": 1
+      },
+      "rights": {
+        "owner": "(주)캐럿펀트 / 내부 참고용",
+        "redistributable": false,
+        "status": "internal-reference-only"
+      },
+      "sha256": "dea82f020ad052106fc89bc35218cb3df262abd0be5bdc110c1838095d012048",
+      "size_bytes": 112372265,
+      "source_path": "I:\\디지털 탁본 참고 자료_(주)캐럿펀트\\디지털 탁본(8).pdf"
+    }
+  ],
+  "schema_version": "1.0"
+}

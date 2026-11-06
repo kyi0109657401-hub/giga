@@ -579,33 +579,43 @@ impl StrataStudioApp {
 
     pub(crate) fn load_real_or_preset_slots(slots: &mut Vec<ArtifactSlotEntry>) {
         slots.clear();
-        let p_7obj = Path::new(r"E:\034(7-실4-4)\7지구 9호-7.obj");
-        if p_7obj.exists() {
-            if let Ok(aligned) = load_any_mesh(p_7obj) {
-                slots.push(ArtifactSlotEntry::from_mesh(
-                    "7지구 9호-7 (완형 토기 세트)",
-                    Some(p_7obj.to_path_buf()),
-                    ArtifactCategory::CompleteVessel,
-                    None,
-                    None,
-                    None,
-                    aligned,
-                ));
+        for p_7obj in [
+            Path::new(r"E:\034(7-실4-4)\7지구 9호-7.obj"),
+            Path::new(r"I:\새 폴더 (11)\034(7-실4-4)\7지구 9호-7.obj"),
+        ] {
+            if p_7obj.exists() {
+                if let Ok(aligned) = load_any_mesh(p_7obj) {
+                    slots.push(ArtifactSlotEntry::from_mesh(
+                        "7지구 9호-7 (완형 토기 세트)",
+                        Some(p_7obj.to_path_buf()),
+                        ArtifactCategory::CompleteVessel,
+                        None,
+                        None,
+                        None,
+                        aligned,
+                    ));
+                    break;
+                }
             }
         }
 
-        let p_1obj = Path::new(r"E:\1\1.obj");
-        if p_1obj.exists() {
-            if let Ok(m1) = load_any_mesh(p_1obj) {
-                slots.push(ArtifactSlotEntry::from_mesh(
-                    "1.obj (구연·저부 편조각 세트)",
-                    Some(p_1obj.to_path_buf()),
-                    ArtifactCategory::Potsherd,
-                    Some(SherdSubtype::RimSherd),
-                    None,
-                    None,
-                    m1,
-                ));
+        for p_1obj in [
+            Path::new(r"E:\1\1.obj"),
+            Path::new(r"I:\새 폴더 (11)\1\1.obj"),
+        ] {
+            if p_1obj.exists() {
+                if let Ok(m1) = load_any_mesh(p_1obj) {
+                    slots.push(ArtifactSlotEntry::from_mesh(
+                        "1.obj (구연·저부 편조각 세트)",
+                        Some(p_1obj.to_path_buf()),
+                        ArtifactCategory::Potsherd,
+                        Some(SherdSubtype::RimSherd),
+                        None,
+                        None,
+                        m1,
+                    ));
+                    break;
+                }
             }
         }
 
@@ -644,8 +654,12 @@ impl StrataStudioApp {
         let nu = 32usize;
         let nv = 12usize;
         for iv in 0..=nv {
-            let z = (iv as f64 / nv as f64) * height_mm;
-            let r = radius_mm * (0.78 + 0.22 * (z / height_mm * std::f64::consts::PI).sin());
+            let t = iv as f64 / nv as f64;
+            let z = t * height_mm;
+            // 완형 발/완 프로파일: 저부(0.68R)에서 구연부(1.00R)로 벌어지며 동체부 변곡을 가짐
+            let r = radius_mm
+                * (0.68 + 0.32 * t.powf(0.75) - 0.02 * (t * std::f64::consts::TAU).sin())
+                    .clamp(0.50, 1.00);
             for iu in 0..=nu {
                 let theta = (iu as f64 / nu as f64) * std::f64::consts::TAU;
                 positions.push([r * theta.cos(), r * theta.sin(), z]);

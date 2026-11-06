@@ -11,6 +11,8 @@ pub struct LoadedObjBundle {
     pub mesh: TriMesh,
     pub mtl_filename: Option<String>,
     pub diffuse_texture_filename: Option<String>,
+    /// 원본 `.obj` 텍스트에 `vn` 정점 법선 레코드가 1개 이상 존재했는지 여부 (`false`면 `TriMesh::build_complete`가 자동 생성함).
+    pub had_vertex_normals_in_file: bool,
 }
 
 /// 대용량 Artec Studio `.obj` 및 `.mtl` 파일을 스트리밍 파싱한다.
@@ -32,6 +34,7 @@ pub fn load_obj_file(path: impl AsRef<Path>) -> Result<LoadedObjBundle, StrataEr
     let mut triangles: Vec<[u32; 3]> = Vec::new();
     let mut triangle_vt_indices: Vec<[Option<u32>; 3]> = Vec::new();
     let mut mtl_filename: Option<String> = None;
+    let mut had_vertex_normals_in_file = false;
 
     let mut line_buf: Vec<u8> = Vec::with_capacity(256);
     loop {
@@ -92,6 +95,8 @@ pub fn load_obj_file(path: impl AsRef<Path>) -> Result<LoadedObjBundle, StrataEr
                     texcoords.push([u, v]);
                 }
             }
+        } else if trimmed.starts_with("vn ") {
+            had_vertex_normals_in_file = true;
         } else if let Some(rest) = trimmed.strip_prefix("f ") {
             let mut face_verts: Vec<u32> = Vec::with_capacity(4);
             let mut face_vts: Vec<Option<u32>> = Vec::with_capacity(4);
@@ -255,6 +260,7 @@ pub fn load_obj_file(path: impl AsRef<Path>) -> Result<LoadedObjBundle, StrataEr
         mesh,
         mtl_filename,
         diffuse_texture_filename,
+        had_vertex_normals_in_file,
     })
 }
 
@@ -303,25 +309,78 @@ fn load_and_downsample_texture(tex_path: &Path, max_dim: u32) -> Option<MeshText
         });
     }
 
-    let scale = (max_dim as f32 / src_w.max(src_h) as f32).min(1.0);
+    Some(downsample_rgba_box_filter(
+        img.as_raw(),
+        src_w,
+        src_h,
+        max_dim,
+    ))
+}
+
+/// 16K(`16384×16384`) 등 초고해상도 RGBA8 버퍼를 `max_dim` 이하로 축소할 때
+/// 단순 점 샘플링(Nearest)의 모아레·앨리어싱을 방지하기 위해 2×2 영역 박스 평균(Box filter)을 수행한다.
+pub fn downsample_rgba_box_filter(
+    src_raw: &[u8],
+    src_w: u32,
+    src_h: u32,
+    max_dim: u32,
+) -> MeshTextureRgba {
+    let required_len = (src_w as usize)
+        .saturating_mul(src_h as usize)
+        .saturating_mul(4);
+    if src_w == 0 || src_h == 0 || src_raw.len() < required_len {
+        return MeshTextureRgba {
+            width: 0,
+            height: 0,
+            rgba: Vec::new(),
+        };
+    }
+
+    let max_d = max_dim.max(1);
+    if src_w <= max_d && src_h <= max_d {
+        return MeshTextureRgba {
+            width: src_w,
+            height: src_h,
+            rgba: src_raw[..required_len].to_vec(),
+        };
+    }
+
+    let scale = (max_d as f32 / src_w.max(src_h) as f32).min(1.0);
     let dst_w = ((src_w as f32 * scale).round() as u32).max(1);
     let dst_h = ((src_h as f32 * scale).round() as u32).max(1);
-    let src_raw = img.as_raw();
     let mut dst_rgba = vec![0u8; (dst_w * dst_h * 4) as usize];
 
+    let step_x = (src_w / dst_w).max(1);
+    let step_y = (src_h / dst_h).max(1);
+    let off_x = (step_x / 2).max(1).min(src_w.saturating_sub(1));
+    let off_y = (step_y / 2).max(1).min(src_h.saturating_sub(1));
+
     for dy in 0..dst_h {
-        let sy = ((dy as u64 * src_h as u64) / dst_h as u64) as u32;
+        let sy0 = ((u64::from(dy) * u64::from(src_h)) / u64::from(dst_h)) as u32;
+        let sy1 = (sy0 + off_y).min(src_h - 1);
         for dx in 0..dst_w {
-            let sx = ((dx as u64 * src_w as u64) / dst_w as u64) as u32;
-            let s_idx = ((sy * src_w + sx) * 4) as usize;
+            let sx0 = ((u64::from(dx) * u64::from(src_w)) / u64::from(dst_w)) as u32;
+            let sx1 = (sx0 + off_x).min(src_w - 1);
+
+            let i00 = ((sy0 * src_w + sx0) * 4) as usize;
+            let i10 = ((sy0 * src_w + sx1) * 4) as usize;
+            let i01 = ((sy1 * src_w + sx0) * 4) as usize;
+            let i11 = ((sy1 * src_w + sx1) * 4) as usize;
+
             let d_idx = ((dy * dst_w + dx) * 4) as usize;
-            dst_rgba[d_idx..d_idx + 4].copy_from_slice(&src_raw[s_idx..s_idx + 4]);
+            for c in 0..4 {
+                let sum = u32::from(src_raw[i00 + c])
+                    + u32::from(src_raw[i10 + c])
+                    + u32::from(src_raw[i01 + c])
+                    + u32::from(src_raw[i11 + c]);
+                dst_rgba[d_idx + c] = ((sum + 2) / 4) as u8;
+            }
         }
     }
 
-    Some(MeshTextureRgba {
+    MeshTextureRgba {
         width: dst_w,
         height: dst_h,
         rgba: dst_rgba,
-    })
+    }
 }
